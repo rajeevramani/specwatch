@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.db
+.specwatch/
+*.tsbuildinfo
+coverage/
+.env
+.claude.local.md
+build-docs/
+spec.yaml
+.DS_Store

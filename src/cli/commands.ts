@@ -162,10 +162,10 @@ export function createProgram(): Command {
 
         const session = sessions.createSession(targetUrl, port, opts['name'], maxSamples);
 
-        const proxy = new ProxyServer({
+        const _proxy = new ProxyServer({
           targetUrl,
           port,
-          onCapture: (req, res) => {
+          onCapture: (_req, _res) => {
             try {
               // This runs post-response (non-blocking)
               // We need to use the async capture, but onCapture is sync.
@@ -180,10 +180,10 @@ export function createProgram(): Command {
         // We need a custom approach: intercept before proxy forwards
         // Override the proxy's request handling by using a wrapper
         let sampleCount = 0;
-        let skippedCount = 0;
+        let _skippedCount = 0;
 
         // Create a new proxy with proper async capture
-        const captureProxy = new ProxyServer({
+        const _captureProxy = new ProxyServer({
           targetUrl,
           port,
         });
@@ -240,7 +240,7 @@ export function createProgram(): Command {
             // Check if body was skipped
             if (pair.requestBodySkipped || pair.responseBodySkipped) {
               sessions.incrementSkippedCount(session.id);
-              skippedCount++;
+              _skippedCount++;
               verbose(`Skipped oversized body: ${pair.method} ${pair.url}`);
               return;
             }
@@ -317,7 +317,7 @@ export function createProgram(): Command {
         info(`\nPress Ctrl+C to stop and aggregate.`);
 
         // Register shutdown handlers
-        const cleanup = registerShutdownHandlers(async (forceQuit) => {
+        const _cleanup = registerShutdownHandlers(async (forceQuit) => {
           if (forceQuit) {
             warn('\nForce quit — skipping aggregation.');
             server.close();

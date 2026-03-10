@@ -1,6 +1,6 @@
 // Unit tests for the reverse proxy server — owned by Proxy Engineer
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as http from 'node:http';
 import { ProxyServer } from './server.js';
 

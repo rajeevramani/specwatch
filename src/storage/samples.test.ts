@@ -9,10 +9,6 @@ import type Database from 'better-sqlite3';
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const STRING_SCHEMA: InferredSchema = {
-  type: 'string',
-  stats: { sampleCount: 1, presenceCount: 1, confidence: 1.0 },
-};
 
 const OBJECT_SCHEMA: InferredSchema = {
   type: 'object',

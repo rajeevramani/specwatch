@@ -1,5 +1,10 @@
 # Specwatch
 
+[![CI](https://github.com/rajeevramani/specwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/rajeevramani/specwatch/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/specwatch.svg)](https://www.npmjs.com/package/specwatch)
+[![Node.js](https://img.shields.io/node/v/specwatch.svg)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Learn API schemas from live traffic. Generate OpenAPI specs automatically.
 
 Specwatch is a zero-infrastructure developer tool that operates as a local reverse proxy. Point it at any API, send requests through it, and it infers a complete OpenAPI specification from the observed traffic.
@@ -136,7 +141,7 @@ Specwatch has five layers:
 
 ## Requirements
 
-- Node.js >= 18
+- Node.js >= 20
 
 ## Development
 

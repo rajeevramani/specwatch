@@ -2,6 +2,7 @@
  * Session repository — CRUD operations for proxy capture sessions.
  * Accepts a Database instance for dependency injection and testability.
  */
+import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { Session, SessionStatus } from '../types/index.js';
 

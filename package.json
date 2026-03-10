@@ -19,7 +19,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint 'src/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts'"
+    "format": "prettier --write 'src/**/*.ts'",
+    "prepublishOnly": "npm run build && npm run test"
   },
   "keywords": [
     "api",
@@ -29,7 +30,16 @@
     "reverse-proxy",
     "rest"
   ],
+  "author": "Rajeev Ramani",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rajeevramani/specwatch.git"
+  },
+  "homepage": "https://github.com/rajeevramani/specwatch#readme",
+  "bugs": {
+    "url": "https://github.com/rajeevramani/specwatch/issues"
+  },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.6.2",

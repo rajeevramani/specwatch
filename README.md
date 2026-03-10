@@ -141,7 +141,7 @@ Specwatch has five layers:
 
 ## Requirements
 
-- Node.js >= 18
+- Node.js >= 20
 
 ## Development
 

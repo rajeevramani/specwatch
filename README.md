@@ -5,34 +5,35 @@
 [![Node.js](https://img.shields.io/node/v/specwatch.svg)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Learn API schemas from live traffic. Generate OpenAPI specs automatically.
+Most APIs don't have OpenAPI specs. The ones that do are usually out of date. Writing them by hand is nobody's idea of a good time, and generating them from source code requires annotations that nobody maintains either.
 
-Specwatch is a zero-infrastructure developer tool that operates as a local reverse proxy. Point it at any API, send requests through it, and it infers a complete OpenAPI specification from the observed traffic.
+Specwatch takes a different approach: point it at any API, use the API normally, and it figures out the schema from what it sees.
+
+It runs as a local reverse proxy. No cloud, no agents, no sidecars. One CLI command, a SQLite database on your machine, and that's it.
 
 ![Specwatch Architecture](architecture.png)
 
 ## Quick Start
 
 ```bash
-# Install dependencies
-npm install
+npx specwatch start https://api.example.com --name "my-api"
+```
 
-# Build
-npm run build
+That gives you a local proxy on `localhost:8080`. Use it instead of the real API:
 
-# Start capturing traffic against your API
-npx specwatch start https://api.example.com --port 8080 --name "my-api"
-
-# Send requests through the proxy (use localhost:8080 instead of the real API)
+```bash
 curl http://localhost:8080/users
 curl http://localhost:8080/users/123
 curl -X POST http://localhost:8080/users -d '{"name":"Alice"}'
+```
 
-# Press Ctrl+C to stop — specwatch automatically aggregates the captured schemas
+Hit `Ctrl+C` when you're done. Specwatch aggregates what it learned, then:
 
-# Export the generated OpenAPI spec
+```bash
 npx specwatch export --name "my-api" -o openapi.yaml
 ```
+
+You get an OpenAPI 3.1 spec. The more traffic you send through it, the better the spec gets — more fields, tighter types, higher confidence.
 
 ## What It Does
 

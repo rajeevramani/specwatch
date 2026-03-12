@@ -293,6 +293,25 @@ export function createProgram(): Command {
           }
         });
 
+        // Check if port is already in use (covers IPv4/IPv6/wildcard bindings)
+        const net = await import('node:net');
+        await new Promise<void>((resolve, reject) => {
+          const testSocket = net.createConnection({ port, host: '127.0.0.1' });
+          testSocket.once('connect', () => {
+            testSocket.destroy();
+            reject(
+              new SpecwatchError(
+                `Port ${port} is already in use.`,
+                `Try: specwatch start ${targetUrl} --port ${port + 1}`,
+              ),
+            );
+          });
+          testSocket.once('error', () => {
+            testSocket.destroy();
+            resolve();
+          });
+        });
+
         // Start listening
         await new Promise<void>((resolve, reject) => {
           server.listen(port, '127.0.0.1', () => resolve());
@@ -300,7 +319,7 @@ export function createProgram(): Command {
             if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
               reject(new SpecwatchError(
                 `Port ${port} is already in use.`,
-                `Try: specwatch start ${url} --port ${port + 1}`,
+                `Try: specwatch start ${targetUrl} --port ${port + 1}`,
               ));
             } else {
               reject(err);

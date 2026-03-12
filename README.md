@@ -5,6 +5,8 @@
 [![Node.js](https://img.shields.io/node/v/specwatch.svg)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+![Specwatch Demo](docs/images/specwatch-1.gif)
+
 Most APIs don't have OpenAPI specs. The ones that do are usually out of date. Writing them by hand is nobody's idea of a good time, and generating them from source code requires annotations that nobody maintains either.
 
 Specwatch takes a different approach: point it at any API, use the API normally, and it figures out the schema from what it sees.

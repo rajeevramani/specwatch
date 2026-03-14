@@ -13,6 +13,120 @@ import yaml from 'js-yaml';
 import type { InferredSchema, AggregatedSchema, ExportOptions, HeaderEntry } from '../types/index.js';
 
 // ============================================================
+// Schema Name Generation & $ref Extraction
+// ============================================================
+
+/**
+ * Generate a PascalCase schema name from HTTP method, path, and role (request/response).
+ *
+ * Examples:
+ *   GET /users, response, 200 → "GetUsersResponse"
+ *   POST /users, request → "PostUsersRequest"
+ *   GET /users/{userId}, response, 404 → "GetUsersUserIdResponse404"
+ *   DELETE /users/{userId}, response, 204 → "DeleteUsersUserIdResponse204"
+ *
+ * @param method - HTTP method (GET, POST, etc.)
+ * @param path - Template path (e.g., /users/{userId})
+ * @param role - 'request' or 'response'
+ * @param statusCode - HTTP status code (only for responses)
+ * @returns PascalCase schema name
+ */
+export function generateSchemaName(
+  method: string,
+  path: string,
+  role: 'request' | 'response',
+  statusCode?: string,
+): string {
+  // PascalCase the method
+  const methodPart = method.charAt(0).toUpperCase() + method.slice(1).toLowerCase();
+
+  // Convert path segments to PascalCase
+  const segments = path
+    .split('/')
+    .filter((s) => s.length > 0)
+    .map((segment) => {
+      const clean = segment.replace(/^\{/, '').replace(/\}$/, '');
+      return clean.charAt(0).toUpperCase() + clean.slice(1);
+    });
+
+  const pathPart = segments.join('');
+  const rolePart = role === 'request' ? 'Request' : 'Response';
+
+  // Only append status code suffix for non-200 responses
+  const statusSuffix = role === 'response' && statusCode !== undefined && statusCode !== '200'
+    ? statusCode
+    : '';
+
+  return `${methodPart}${pathPart}${rolePart}${statusSuffix}`;
+}
+
+/**
+ * A collector that accumulates schemas destined for components/schemas.
+ * Allows operation builders to register schemas and get back $ref strings.
+ */
+interface SchemaCollector {
+  /** Register a schema and return the $ref path */
+  register(name: string, schema: Record<string, unknown>): string;
+  /** Get all collected schemas */
+  getSchemas(): Record<string, Record<string, unknown>>;
+}
+
+/**
+ * Deep-equal comparison for two schema objects.
+ * Handles nested objects and arrays recursively.
+ */
+function schemasAreEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return false;
+
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    return a.every((item, i) => schemasAreEqual(item, (b as unknown[])[i]));
+  }
+
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => key in bObj && schemasAreEqual(aObj[key], bObj[key]));
+}
+
+function createSchemaCollector(): SchemaCollector {
+  const schemas: Record<string, Record<string, unknown>> = {};
+  return {
+    register(name: string, schema: Record<string, unknown>): string {
+      if (name in schemas) {
+        // Same name already registered — check if schemas are identical
+        if (schemasAreEqual(schemas[name], schema)) {
+          // Structurally identical: reuse the existing name
+          return `#/components/schemas/${name}`;
+        }
+        // Different schema with same name: find a unique suffixed name
+        let suffix = 2;
+        while (`${name}${suffix}` in schemas) {
+          if (schemasAreEqual(schemas[`${name}${suffix}`], schema)) {
+            // Found an existing suffixed entry that matches
+            return `#/components/schemas/${name}${suffix}`;
+          }
+          suffix++;
+        }
+        const uniqueName = `${name}${suffix}`;
+        schemas[uniqueName] = schema;
+        return `#/components/schemas/${uniqueName}`;
+      }
+      schemas[name] = schema;
+      return `#/components/schemas/${name}`;
+    },
+    getSchemas(): Record<string, Record<string, unknown>> {
+      return schemas;
+    },
+  };
+}
+
+// ============================================================
 // Task 5.1 — Schema to OpenAPI Conversion
 // ============================================================
 
@@ -238,6 +352,7 @@ export function buildPathsObject(
   schemas: AggregatedSchema[],
   options: Partial<ExportOptions> = {},
   globalHeaders: Set<string> = new Set(),
+  collector?: SchemaCollector,
 ): Record<string, unknown> {
   const paths: Record<string, Record<string, unknown>> = {};
 
@@ -247,7 +362,7 @@ export function buildPathsObject(
       paths[pathKey] = {};
     }
 
-    const operation = buildOperationObject(schema, options, globalHeaders);
+    const operation = buildOperationObject(schema, options, globalHeaders, collector);
     paths[pathKey][schema.httpMethod.toLowerCase()] = operation;
   }
 
@@ -278,6 +393,7 @@ export function buildOperationObject(
   schema: AggregatedSchema,
   options: Partial<ExportOptions> = {},
   globalHeaders: Set<string> = new Set(),
+  collector?: SchemaCollector,
 ): Record<string, unknown> {
   const operation: Record<string, unknown> = {};
 
@@ -329,13 +445,25 @@ export function buildOperationObject(
   // Request body
   if (schema.requestSchema !== undefined) {
     const requestBodySchema = convertSchemaToOpenApi(schema.requestSchema);
-    operation['requestBody'] = {
-      content: {
-        'application/json': {
-          schema: requestBodySchema,
+    if (collector !== undefined) {
+      const schemaName = generateSchemaName(schema.httpMethod, schema.path, 'request');
+      const ref = collector.register(schemaName, requestBodySchema);
+      operation['requestBody'] = {
+        content: {
+          'application/json': {
+            schema: { $ref: ref },
+          },
         },
-      },
-    };
+      };
+    } else {
+      operation['requestBody'] = {
+        content: {
+          'application/json': {
+            schema: requestBodySchema,
+          },
+        },
+      };
+    }
   }
 
   // Responses per status code
@@ -344,7 +472,15 @@ export function buildOperationObject(
   if (schema.responseSchemas !== undefined) {
     for (const [statusCode, responseSchema] of Object.entries(schema.responseSchemas)) {
       const statusNum = parseInt(statusCode, 10);
-      responses[statusCode] = buildResponseObject(statusNum, responseSchema, options);
+      responses[statusCode] = buildResponseObject(
+        statusNum,
+        responseSchema,
+        options,
+        collector,
+        schema.httpMethod,
+        schema.path,
+        statusCode,
+      );
     }
   }
 
@@ -370,6 +506,10 @@ function buildResponseObject(
   statusCode: number,
   responseSchema: InferredSchema,
   _options: Partial<ExportOptions> = {},
+  collector?: SchemaCollector,
+  httpMethod?: string,
+  path?: string,
+  statusCodeStr?: string,
 ): Record<string, unknown> {
   const description = getStatusCodeDescription(statusCode);
 
@@ -379,6 +519,19 @@ function buildResponseObject(
   }
 
   const openApiSchema = convertSchemaToOpenApi(responseSchema);
+
+  if (collector !== undefined && httpMethod !== undefined && path !== undefined) {
+    const schemaName = generateSchemaName(httpMethod, path, 'response', statusCodeStr);
+    const ref = collector.register(schemaName, openApiSchema);
+    return {
+      description,
+      content: {
+        'application/json': {
+          schema: { $ref: ref },
+        },
+      },
+    };
+  }
 
   return {
     description,
@@ -560,7 +713,9 @@ export function buildOpenApiDocument(
   const globalHeaderEntries = extractGlobalHeaders(schemas);
   const globalHeaderNames = new Set(globalHeaderEntries.map((h) => h.name.toLowerCase()));
 
-  const paths = buildPathsObject(schemas, options, globalHeaderNames);
+  // Create a collector for $ref extraction (always enabled)
+  const collector = createSchemaCollector();
+  const paths = buildPathsObject(schemas, options, globalHeaderNames, collector);
 
   const doc: Record<string, unknown> = {
     openapi: '3.1.0',
@@ -572,10 +727,23 @@ export function buildOpenApiDocument(
     paths,
   };
 
+  // Build components object
+  const components: Record<string, unknown> = {};
+
   const securityResult = detectSecuritySchemes(schemas);
   if (securityResult !== undefined) {
-    doc['components'] = { securitySchemes: securityResult.securitySchemes };
+    components['securitySchemes'] = securityResult.securitySchemes;
     doc['security'] = securityResult.security;
+  }
+
+  // Add collected schemas to components
+  const collectedSchemas = collector.getSchemas();
+  if (Object.keys(collectedSchemas).length > 0) {
+    components['schemas'] = collectedSchemas;
+  }
+
+  if (Object.keys(components).length > 0) {
+    doc['components'] = components;
   }
 
   // Add global headers as metadata extension when requested
@@ -637,10 +805,14 @@ function convertSchemaTo30(schema: Record<string, unknown>): Record<string, unkn
 
 /**
  * Recursively walk an OpenAPI document and convert all `schema` objects to 3.0.
+ *
+ * @param obj - Current node in the document tree
+ * @param parentKey - The key under which this node sits in its parent object.
+ *                    Used to scope `schemas` handling to `components.schemas` only.
  */
-function convertDeep(obj: unknown): unknown {
+function convertDeep(obj: unknown, parentKey?: string): unknown {
   if (Array.isArray(obj)) {
-    return obj.map(convertDeep);
+    return obj.map((item) => convertDeep(item, parentKey));
   }
   if (typeof obj !== 'object' || obj === null) {
     return obj;
@@ -651,9 +823,33 @@ function convertDeep(obj: unknown): unknown {
 
   for (const [key, value] of Object.entries(record)) {
     if (key === 'schema' && typeof value === 'object' && value !== null) {
-      result[key] = convertSchemaTo30(value as Record<string, unknown>);
+      const schemaObj = value as Record<string, unknown>;
+      // Don't convert $ref objects — pass them through as-is
+      if ('$ref' in schemaObj) {
+        result[key] = schemaObj;
+      } else {
+        result[key] = convertSchemaTo30(schemaObj);
+      }
+    } else if (
+      key === 'schemas' &&
+      parentKey === 'components' &&
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
+      // Handle components/schemas — each value is a schema definition to convert
+      const schemasObj = value as Record<string, unknown>;
+      const convertedSchemas: Record<string, unknown> = {};
+      for (const [schemaName, schemaVal] of Object.entries(schemasObj)) {
+        if (typeof schemaVal === 'object' && schemaVal !== null) {
+          convertedSchemas[schemaName] = convertSchemaTo30(schemaVal as Record<string, unknown>);
+        } else {
+          convertedSchemas[schemaName] = schemaVal;
+        }
+      }
+      result[key] = convertedSchemas;
     } else if (typeof value === 'object' && value !== null) {
-      result[key] = convertDeep(value);
+      result[key] = convertDeep(value, key);
     } else {
       result[key] = value;
     }

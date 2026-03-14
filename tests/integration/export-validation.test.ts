@@ -307,7 +307,7 @@ describe('Export validation (Phase C)', () => {
     );
   });
 
-  it('request body is placed under requestBody.content["application/json"].schema', () => {
+  it('request body uses $ref to components/schemas and schema is extracted', () => {
     const schema = makeAggregatedSchema({
       httpMethod: 'POST',
       path: '/users',
@@ -327,11 +327,17 @@ describe('Export validation (Phase C)', () => {
     const jsonContent = content['application/json'] as Record<string, unknown>;
     expect(jsonContent['schema']).toBeDefined();
 
-    // Verify the schema structure (stats must be stripped)
+    // Verify the schema uses $ref
     const bodySchema = jsonContent['schema'] as Record<string, unknown>;
-    expect(bodySchema['type']).toBe('object');
-    expect(bodySchema['properties']).toBeDefined();
-    const props = bodySchema['properties'] as Record<string, unknown>;
+    expect(bodySchema['$ref']).toBe('#/components/schemas/PostUsersRequest');
+
+    // Verify the actual schema is in components/schemas
+    const components = doc['components'] as Record<string, unknown>;
+    expect(components).toBeDefined();
+    const schemas = components['schemas'] as Record<string, Record<string, unknown>>;
+    expect(schemas['PostUsersRequest']).toBeDefined();
+    expect(schemas['PostUsersRequest']['type']).toBe('object');
+    const props = schemas['PostUsersRequest']['properties'] as Record<string, unknown>;
     expect(props['name']).toEqual({ type: 'string' });
     expect(props['email']).toEqual({ type: 'string', format: 'email' });
 
@@ -347,7 +353,7 @@ describe('Export validation (Phase C)', () => {
     ).toBeDefined();
   });
 
-  it('response schema is placed under responses["200"].content["application/json"].schema', () => {
+  it('response schema uses $ref to components/schemas', () => {
     const schema = makeAggregatedSchema({
       httpMethod: 'GET',
       path: '/users',
@@ -369,10 +375,16 @@ describe('Export validation (Phase C)', () => {
     const jsonContent = content['application/json'] as Record<string, unknown>;
     expect(jsonContent['schema']).toBeDefined();
 
-    // Verify schema content
+    // Verify the schema uses $ref
     const responseSchema = jsonContent['schema'] as Record<string, unknown>;
-    expect(responseSchema['type']).toBe('object');
-    expect(responseSchema['required']).toEqual(['id', 'name', 'email']);
+    expect(responseSchema['$ref']).toBe('#/components/schemas/GetUsersResponse');
+
+    // Verify the actual schema is in components/schemas
+    const components = doc['components'] as Record<string, unknown>;
+    const schemas = components['schemas'] as Record<string, Record<string, unknown>>;
+    expect(schemas['GetUsersResponse']).toBeDefined();
+    expect(schemas['GetUsersResponse']['type']).toBe('object');
+    expect(schemas['GetUsersResponse']['required']).toEqual(['id', 'name', 'email']);
   });
 
   it('204 No Content response has description but no content block', () => {

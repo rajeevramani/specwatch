@@ -313,4 +313,118 @@ describe('OpenAPI 3.0 conversion', () => {
     expect(components['securitySchemes']).toBeDefined();
     expect(doc30['security']).toBeDefined();
   });
+
+  it('does not process a "schemas" key that is not under components', () => {
+    // A document where "schemas" appears inside a response body description,
+    // not under components. It should be recursed into normally (via convertDeep)
+    // but NOT treated as component schema definitions (via convertSchemaTo30).
+    const doc31: Record<string, unknown> = {
+      openapi: '3.1.0',
+      info: { title: 'Test', version: '1.0.0' },
+      paths: {
+        '/meta': {
+          get: {
+            operationId: 'getMeta',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        // A response field named "schemas" that holds arbitrary data
+                        schemas: {
+                          type: 'object',
+                          properties: {
+                            count: { type: ['integer', 'null'] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const doc30 = convertToOpenApi30(doc31);
+    const paths = doc30['paths'] as Record<string, Record<string, Record<string, unknown>>>;
+    const responses = paths['/meta']['get']['responses'] as Record<string, Record<string, unknown>>;
+    const content = responses['200']['content'] as Record<string, Record<string, unknown>>;
+    const schema = content['application/json']['schema'] as Record<string, unknown>;
+    const props = schema['properties'] as Record<string, Record<string, unknown>>;
+
+    // The "schemas" field inside the response body should NOT have been processed
+    // by convertSchemaTo30 directly. It is nested inside a "schema" key, so
+    // convertSchemaTo30 handles it through normal property recursion.
+    // The key point: "schemas.count" with type: ['integer', 'null'] should still
+    // be converted (via the parent schema conversion), proving the recursive
+    // path works correctly without the special-case schemas handling.
+    const schemasField = props['schemas'] as Record<string, unknown>;
+    expect(schemasField).toBeDefined();
+    const schemasProps = schemasField['properties'] as Record<string, Record<string, unknown>>;
+    expect(schemasProps['count']['type']).toBe('integer');
+    expect(schemasProps['count']['nullable']).toBe(true);
+  });
+
+  it('does not apply convertSchemaTo30 to a top-level custom "schemas" field', () => {
+    // Simulate an extension or custom field named "schemas" at the document root.
+    // Before the fix, convertDeep would treat this as component schemas and run
+    // convertSchemaTo30 on each entry. After the fix, it should recurse normally.
+    const doc31: Record<string, unknown> = {
+      openapi: '3.1.0',
+      info: { title: 'Test', version: '1.0.0' },
+      paths: {},
+      // Custom top-level "schemas" field (not under components)
+      'x-custom': {
+        schemas: {
+          MyThing: {
+            type: ['string', 'null'],
+            customField: 'should-be-preserved',
+          },
+        },
+      },
+    };
+
+    const doc30 = convertToOpenApi30(doc31);
+    const xCustom = doc30['x-custom'] as Record<string, unknown>;
+    const schemas = xCustom['schemas'] as Record<string, Record<string, unknown>>;
+
+    // Since this "schemas" is NOT under "components", convertSchemaTo30 should
+    // NOT have been applied. The type array should remain as-is (unconverted).
+    expect(schemas['MyThing']['type']).toEqual(['string', 'null']);
+    expect(schemas['MyThing']['nullable']).toBeUndefined();
+    expect(schemas['MyThing']['customField']).toBe('should-be-preserved');
+  });
+
+  it('still converts components/schemas correctly after the scoping fix', () => {
+    const doc31: Record<string, unknown> = {
+      openapi: '3.1.0',
+      info: { title: 'Test', version: '1.0.0' },
+      paths: {},
+      components: {
+        schemas: {
+          User: {
+            type: 'object',
+            properties: {
+              name: { type: ['string', 'null'] },
+            },
+          },
+        },
+      },
+    };
+
+    const doc30 = convertToOpenApi30(doc31);
+    const components = doc30['components'] as Record<string, unknown>;
+    const schemas = components['schemas'] as Record<string, Record<string, unknown>>;
+    const userProps = schemas['User']['properties'] as Record<string, Record<string, unknown>>;
+
+    // components/schemas SHOULD be converted
+    expect(userProps['name']['type']).toBe('string');
+    expect(userProps['name']['nullable']).toBe(true);
+  });
 });

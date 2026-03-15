@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **No longer need to stop the proxy to get a spec.** In v0.1.0, you had to `Ctrl+C` the proxy before it would aggregate and produce a schema. With `--auto-aggregate`, specwatch now aggregates in the background every `--max-samples` requests while the proxy keeps running. You can export a spec at any time without interrupting traffic capture.
+
 ### Added
 
 - Snapshot-based aggregation: cumulative schema building across multiple aggregation runs within a session
-- Auto-aggregate mode (`--auto-aggregate`): automatically aggregates every `--max-samples` and keeps capturing without stopping the proxy
+- Auto-aggregate mode (`--auto-aggregate`): automatically aggregates every `--max-samples` and keeps capturing
 - `specwatch snapshots` command to list snapshots for a session
 - Snapshot diffing: `specwatch diff --name "api" --snapshots 1 3` to compare snapshots within a session
 - `--snapshot <n>` option on `specwatch export` to export a specific snapshot

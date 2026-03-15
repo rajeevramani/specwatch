@@ -29,10 +29,19 @@ curl http://localhost:8080/users/123
 curl -X POST http://localhost:8080/users -d '{"name":"Alice"}'
 ```
 
-With `--auto-aggregate`, specwatch automatically aggregates every 200 samples and keeps capturing — no need to stop the server. Each aggregation creates a snapshot so you can track how the schema evolves. When you're done, hit `Ctrl+C` for a final aggregation, then:
+With `--auto-aggregate`, specwatch aggregates every 200 samples and keeps capturing — no need to stop the server. Each aggregation creates a versioned snapshot, so you can watch the schema get more complete over time:
+
+```bash
+npx specwatch snapshots --name "my-api"
+```
+
+![Specwatch Snapshots](docs/images/snapshot.png)
+
+When you're ready, export the latest (or any specific snapshot):
 
 ```bash
 npx specwatch export --name "my-api" -o openapi.yaml
+npx specwatch export --name "my-api" --snapshot 2 -o openapi-v2.yaml
 ```
 
 You get an OpenAPI 3.1 spec with schemas extracted into `components/schemas` using `$ref` references. The more traffic you send through it, the better the spec gets — more fields, tighter types, higher confidence.
@@ -109,12 +118,16 @@ specwatch aggregate --name "my-api"   # By name
 
 ### `specwatch snapshots [session-id]`
 
-List snapshots for a session. Snapshots are created each time auto-aggregate runs.
+List snapshots for a session. Each auto-aggregate cycle creates a new snapshot, giving you a versioned history of how the schema evolves as more traffic flows through.
 
 ```bash
 specwatch snapshots                   # Active session
 specwatch snapshots --name "my-api"   # By name
 ```
+
+![Specwatch Snapshots](docs/images/snapshot.png)
+
+Each snapshot captures the full schema at that point in time. You can export or diff any snapshot individually.
 
 ### `specwatch diff <session1> <session2>`
 

@@ -502,6 +502,14 @@ export function countUniqueResponseShapes(samples: Sample[]): number {
 export interface AggregationResult {
   schemas: AggregatedSchema[];
   sampleCount: number;
+  snapshot: number;
+}
+
+export interface AggregationOptions {
+  /** Snapshot number to use. When provided, deletes existing rows for this snapshot before inserting. */
+  snapshot?: number;
+  /** If true, skip session state transitions (for mid-session auto-aggregation). */
+  skipStateTransition?: boolean;
 }
 
 /**
@@ -519,7 +527,11 @@ export interface AggregationResult {
  *   9. Store aggregated schemas
  *   10. Transition session to 'completed'
  */
-export function runAggregation(db: Database.Database, sessionId: string): AggregationResult {
+export function runAggregation(
+  db: Database.Database,
+  sessionId: string,
+  options?: AggregationOptions,
+): AggregationResult {
   const sessions = new SessionRepository(db);
   const sampleRepo = new SampleRepository(db);
   const schemaRepo = new AggregatedSchemaRepository(db);
@@ -527,16 +539,26 @@ export function runAggregation(db: Database.Database, sessionId: string): Aggreg
   const session = sessions.getSession(sessionId);
   if (!session) throw new Error(`Session '${sessionId}' not found`);
 
-  // Transition to aggregating
-  if (session.status === 'active') {
+  const snapshot = options?.snapshot ?? 1;
+  const skipStateTransition = options?.skipStateTransition ?? false;
+
+  // Transition to aggregating (skip for mid-session auto-aggregate)
+  if (!skipStateTransition && session.status === 'active') {
     sessions.updateSessionStatus(sessionId, 'aggregating');
   }
 
   try {
     const allSamples = sampleRepo.listBySession(sessionId);
     if (allSamples.length === 0) {
-      sessions.updateSessionStatus(sessionId, 'completed');
-      return { schemas: [], sampleCount: 0 };
+      if (!skipStateTransition) {
+        sessions.updateSessionStatus(sessionId, 'completed');
+      }
+      return { schemas: [], sampleCount: 0, snapshot };
+    }
+
+    // For cumulative snapshots, delete previous rows for this snapshot before inserting
+    if (options?.snapshot !== undefined) {
+      schemaRepo.deleteBySessionSnapshot(sessionId, snapshot);
     }
 
     // Group by method + normalizedPath + statusCode
@@ -699,6 +721,7 @@ export function runAggregation(db: Database.Database, sessionId: string): Aggreg
         httpMethod: endpoint.method,
         path: endpoint.path,
         version,
+        snapshot,
         requestSchema: requestSchema ?? undefined,
         responseSchemas: Object.keys(responseSchemas).length > 0 ? responseSchemas : undefined,
         requestHeaders: mergedRequestHeaders,
@@ -721,6 +744,7 @@ export function runAggregation(db: Database.Database, sessionId: string): Aggreg
         httpMethod: endpoint.method,
         path: endpoint.path,
         version,
+        snapshot,
         requestSchema,
         responseSchemas: Object.keys(responseSchemas).length > 0 ? responseSchemas : undefined,
         requestHeaders: mergedRequestHeaders,
@@ -737,10 +761,12 @@ export function runAggregation(db: Database.Database, sessionId: string): Aggreg
       });
     }
 
-    // Transition to completed
-    sessions.updateSessionStatus(sessionId, 'completed');
+    // Transition to completed (skip for mid-session auto-aggregate)
+    if (!skipStateTransition) {
+      sessions.updateSessionStatus(sessionId, 'completed');
+    }
 
-    return { schemas: aggregated, sampleCount: allSamples.length };
+    return { schemas: aggregated, sampleCount: allSamples.length, snapshot };
   } catch (err) {
     // Transition to failed
     try {

@@ -20,6 +20,7 @@ interface AggregatedSchemaRow {
   http_method: string;
   path: string;
   version: number;
+  snapshot: number;
   request_schema: string | null;
   response_schemas: string | null;
   request_headers: string | null;
@@ -47,6 +48,7 @@ function rowToAggregatedSchema(row: AggregatedSchemaRow): AggregatedSchema {
     httpMethod: row.http_method,
     path: row.path,
     version: row.version,
+    snapshot: row.snapshot,
     requestSchema: row.request_schema
       ? (JSON.parse(row.request_schema) as InferredSchema)
       : undefined,
@@ -100,20 +102,21 @@ export class AggregatedSchemaRepository {
     const result = this.db
       .prepare(
         `INSERT INTO aggregated_schemas
-           (session_id, http_method, path, version,
+           (session_id, http_method, path, version, snapshot,
             request_schema, response_schemas,
             request_headers, response_headers, query_params, path_param_values,
             sample_count, confidence_score,
             breaking_changes, previous_session_id,
             first_observed, last_observed, created_at)
          VALUES
-           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         schema.sessionId,
         schema.httpMethod,
         schema.path,
         schema.version,
+        schema.snapshot ?? 1,
         schema.requestSchema != null ? JSON.stringify(schema.requestSchema) : null,
         schema.responseSchemas != null ? JSON.stringify(schema.responseSchemas) : null,
         schema.requestHeaders != null ? JSON.stringify(schema.requestHeaders) : null,
@@ -181,5 +184,86 @@ export class AggregatedSchemaRepository {
       .get(sessionId, method, path) as AggregatedSchemaRow | undefined;
 
     return row ? rowToAggregatedSchema(row) : null;
+  }
+
+  /**
+   * Returns the latest snapshot number for a session, or 0 if none exist.
+   */
+  getMaxSnapshotForSession(sessionId: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT MAX(snapshot) as max_snapshot FROM aggregated_schemas WHERE session_id = ?`,
+      )
+      .get(sessionId) as { max_snapshot: number | null } | undefined;
+
+    return row?.max_snapshot ?? 0;
+  }
+
+  /**
+   * Returns all aggregated schemas for a specific snapshot of a session.
+   */
+  listBySessionSnapshot(sessionId: string, snapshot: number): AggregatedSchema[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM aggregated_schemas
+         WHERE session_id = ? AND snapshot = ?
+         ORDER BY path ASC, http_method ASC`,
+      )
+      .all(sessionId, snapshot) as AggregatedSchemaRow[];
+
+    return rows.map(rowToAggregatedSchema);
+  }
+
+  /**
+   * Returns schemas for the latest snapshot of a session.
+   */
+  listBySessionLatestSnapshot(sessionId: string): AggregatedSchema[] {
+    const maxSnapshot = this.getMaxSnapshotForSession(sessionId);
+    if (maxSnapshot === 0) return [];
+    return this.listBySessionSnapshot(sessionId, maxSnapshot);
+  }
+
+  /**
+   * Deletes all aggregated schemas for a specific snapshot of a session.
+   */
+  /**
+   * Returns distinct snapshot numbers for a session with summary stats.
+   */
+  listSnapshotsForSession(
+    sessionId: string,
+  ): Array<{ snapshot: number; endpointCount: number; sampleCount: number; avgConfidence: number; createdAt: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT snapshot,
+                COUNT(*) as endpoint_count,
+                SUM(sample_count) as total_samples,
+                AVG(confidence_score) as avg_confidence,
+                MAX(created_at) as created_at
+         FROM aggregated_schemas
+         WHERE session_id = ?
+         GROUP BY snapshot
+         ORDER BY snapshot ASC`,
+      )
+      .all(sessionId) as Array<{
+        snapshot: number;
+        endpoint_count: number;
+        total_samples: number;
+        avg_confidence: number;
+        created_at: string;
+      }>;
+
+    return rows.map((r) => ({
+      snapshot: r.snapshot,
+      endpointCount: r.endpoint_count,
+      sampleCount: r.total_samples,
+      avgConfidence: r.avg_confidence,
+      createdAt: r.created_at,
+    }));
+  }
+
+  deleteBySessionSnapshot(sessionId: string, snapshot: number): void {
+    this.db
+      .prepare(`DELETE FROM aggregated_schemas WHERE session_id = ? AND snapshot = ?`)
+      .run(sessionId, snapshot);
   }
 }

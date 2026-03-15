@@ -854,10 +854,29 @@ describe('buildOpenApiDocument securitySchemes', () => {
     expect(security).toContainEqual({ bearerAuth: [] });
   });
 
-  it('does not include components or security when no auth headers', () => {
+  it('does not include components or security when no auth headers and no response schemas', () => {
     const schemas = [makeAggregatedSchema()];
     const doc = buildOpenApiDocument(schemas);
+    // No auth headers AND no response schemas → no components at all
     expect(doc['components']).toBeUndefined();
+    expect(doc['security']).toBeUndefined();
+  });
+
+  it('includes components.schemas but not securitySchemes when response schemas exist without auth headers', () => {
+    const responseSchema: InferredSchema = {
+      type: 'object',
+      properties: {
+        id: { type: 'integer', stats: { sampleCount: 5, presenceCount: 5, confidence: 1.0 } },
+      },
+      stats: { sampleCount: 5, presenceCount: 5, confidence: 1.0 },
+    };
+    const schemas = [makeAggregatedSchema({ responseSchemas: { '200': responseSchema } })];
+    const doc = buildOpenApiDocument(schemas);
+
+    const components = doc['components'] as Record<string, unknown>;
+    expect(components).toBeDefined();
+    expect(components['schemas']).toBeDefined();
+    expect(components['securitySchemes']).toBeUndefined();
     expect(doc['security']).toBeUndefined();
   });
 

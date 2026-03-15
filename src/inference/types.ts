@@ -136,6 +136,8 @@ export interface AggregatedSchema {
   path: string;
   /** Schema version (auto-incremented across sessions) */
   version: number;
+  /** Snapshot number within a session (for auto-aggregate) */
+  snapshot: number;
   /** Merged request body schema */
   requestSchema?: InferredSchema;
   /** Response schemas keyed by status code (e.g., {"200": {...}, "404": {...}}) */

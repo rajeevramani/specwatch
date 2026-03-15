@@ -98,6 +98,43 @@ export function formatSessionList(sessions: Session[]): string {
   return table.toString();
 }
 
+export interface SnapshotInfo {
+  snapshot: number;
+  endpointCount: number;
+  sampleCount: number;
+  avgConfidence: number;
+  createdAt: string;
+}
+
+export function formatSnapshotList(snapshots: SnapshotInfo[]): string {
+  if (snapshots.length === 0) {
+    return 'No snapshots found.';
+  }
+
+  if (!isInteractive()) {
+    return snapshots
+      .map((s) => `${s.snapshot}\t${s.endpointCount}\t${s.sampleCount}\t${s.avgConfidence.toFixed(2)}\t${s.createdAt}`)
+      .join('\n');
+  }
+
+  const table = new Table({
+    head: ['Snapshot', 'Endpoints', 'Samples', 'Confidence', 'Created'],
+    style: { head: ['cyan'] },
+  });
+
+  for (const s of snapshots) {
+    table.push([
+      s.snapshot.toString(),
+      s.endpointCount.toString(),
+      s.sampleCount.toString(),
+      s.avgConfidence.toFixed(2),
+      s.createdAt.slice(0, 16).replace('T', ' '),
+    ]);
+  }
+
+  return table.toString();
+}
+
 export function formatAggregationSummary(
   schemas: AggregatedSchema[],
   sampleCount: number,

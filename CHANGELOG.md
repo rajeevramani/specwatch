@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-15
+
+### Changed
+
+- **No longer need to stop the proxy to get a spec.** In v0.1.0, you had to `Ctrl+C` the proxy before it would aggregate and produce a schema. With `--auto-aggregate`, specwatch now aggregates in the background every `--max-samples` requests while the proxy keeps running. You can export a spec at any time without interrupting traffic capture.
+
+### Added
+
+- Snapshot-based aggregation: cumulative schema building across multiple aggregation runs within a session
+- Auto-aggregate mode (`--auto-aggregate`): automatically aggregates every `--max-samples` and keeps capturing
+- `specwatch snapshots` command to list snapshots for a session
+- Snapshot diffing: `specwatch diff --name "api" --snapshots 1 3` to compare snapshots within a session
+- `--snapshot <n>` option on `specwatch export` to export a specific snapshot
+- Database migration system using `PRAGMA user_version` with automatic migration on database open
+- Pre-migration database detection and safe upgrade path
+- Schema extraction into `components/schemas` with `$ref` references in OpenAPI export
+- Auto-generated PascalCase schema names from HTTP method + path (e.g., `GetUsersUserIdResponse`)
+- Schema collision detection: identical schemas deduplicated, different schemas get numeric suffix
+- Integration tests for auto-aggregate threshold triggering and diff --snapshots parsing
+
+### Fixed
+
+- Race condition: proxy now drains in-flight connections before running auto-aggregation
+- `convertDeep` OAS 3.0 conversion scoped to `components.schemas` only (no longer matches bare `schemas` keys elsewhere in the document)
+
 ## [0.1.0] - 2026-03-10
 
 ### Added

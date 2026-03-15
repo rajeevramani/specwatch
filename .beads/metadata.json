@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "specwatch",
+  "project_id": "705da702-65c7-49ca-bbef-0baa46569bab"
+}

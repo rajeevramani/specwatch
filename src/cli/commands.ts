@@ -37,6 +37,7 @@ import {
   formatSessionList,
   formatAggregationSummary,
   formatDiff,
+  formatSnapshotList,
 } from './output.js';
 import { SpecwatchError, noActiveSessionError, sessionNotFoundError, sessionNameNotFoundError, noCompletedSessionsError } from './errors.js';
 import type { ExportOptions, AggregatedSchema } from '../types/index.js';
@@ -126,6 +127,7 @@ export function createProgram(): Command {
     .option('-p, --port <port>', 'Local proxy port', '8080')
     .option('-n, --name <name>', 'Session name')
     .option('--max-samples <count>', 'Maximum samples to capture')
+    .option('--auto-aggregate', 'Auto-aggregate every --max-samples and continue capturing')
     .action(async (url: string, opts: Record<string, string>) => {
       try {
         const port = parseInt(opts['port'], 10);
@@ -134,6 +136,13 @@ export function createProgram(): Command {
         }
 
         const maxSamples = opts['maxSamples'] ? parseInt(opts['maxSamples'], 10) : undefined;
+        const autoAggregate = opts['autoAggregate'] === true || opts['autoAggregate'] === '';
+        if (autoAggregate && maxSamples === undefined) {
+          throw new SpecwatchError(
+            '--auto-aggregate requires --max-samples.',
+            'Example: specwatch start <url> --max-samples 200 --auto-aggregate',
+          );
+        }
 
         // Validate URL
         let targetUrl: string;
@@ -181,6 +190,8 @@ export function createProgram(): Command {
         // Override the proxy's request handling by using a wrapper
         let sampleCount = 0;
         let _skippedCount = 0;
+        let currentSnapshot = 0;
+        let samplesSinceLastSnapshot = 0;
 
         // Create a new proxy with proper async capture
         const _captureProxy = new ProxyServer({
@@ -232,8 +243,8 @@ export function createProgram(): Command {
           try {
             const pair = await capturePromise;
 
-            // Check max samples
-            if (maxSamples !== undefined && sampleCount >= maxSamples) {
+            // Check max samples (skip when auto-aggregating — limit is per-snapshot, not cumulative)
+            if (maxSamples !== undefined && !autoAggregate && sampleCount >= maxSamples) {
               return;
             }
 
@@ -276,15 +287,35 @@ export function createProgram(): Command {
 
             sessions.incrementSampleCount(session.id);
             sampleCount++;
+            samplesSinceLastSnapshot++;
 
             verbose(
               `[${sampleCount}] ${pair.method} ${pair.url} → ${pair.statusCode}`,
             );
 
-            // Auto-stop if max samples reached
-            if (maxSamples !== undefined && sampleCount >= maxSamples) {
-              info(`\nReached max samples (${maxSamples}). Stopping...`);
-              server.close();
+            // Check max samples threshold
+            if (maxSamples !== undefined && samplesSinceLastSnapshot >= maxSamples) {
+              if (autoAggregate) {
+                // Auto-aggregate: create a new cumulative snapshot and keep going
+                currentSnapshot++;
+                info(`\nAuto-aggregating snapshot ${currentSnapshot} (${sampleCount} total samples)...`);
+                try {
+                  const result = runAggregation(db, session.id, {
+                    snapshot: currentSnapshot,
+                    skipStateTransition: true,
+                  });
+                  success(`Snapshot ${currentSnapshot}: ${result.schemas.length} endpoints from ${result.sampleCount} samples`);
+                } catch (aggErr) {
+                  logError(
+                    `Auto-aggregation failed: ${aggErr instanceof Error ? aggErr.message : String(aggErr)}`,
+                  );
+                }
+                samplesSinceLastSnapshot = 0;
+              } else {
+                // No auto-aggregate: stop capturing
+                info(`\nReached max samples (${maxSamples}). Stopping...`);
+                server.close();
+              }
             }
           } catch (captureErr) {
             verbose(
@@ -333,6 +364,7 @@ export function createProgram(): Command {
         info(`  Target:  ${targetUrl}`);
         info(`  Proxy:   http://localhost:${port}`);
         if (maxSamples) info(`  Max:     ${maxSamples} samples`);
+        if (autoAggregate) info(`  Mode:    auto-aggregate every ${maxSamples} samples`);
         info(`\nPress Ctrl+C to stop and aggregate.`);
 
         // Register shutdown handlers
@@ -360,9 +392,24 @@ export function createProgram(): Command {
 
           info(`Aggregating ${count} samples...`);
           try {
-            const result = runAggregation(db, session.id);
-            success(`Done! ${formatAggregationSummary(result.schemas, result.sampleCount)}`);
-            info(`\nExport with: specwatch export`);
+            if (autoAggregate) {
+              // Final snapshot with any remaining samples
+              currentSnapshot++;
+              const result = runAggregation(db, session.id, {
+                snapshot: currentSnapshot,
+                skipStateTransition: true,
+              });
+              // Now transition to completed
+              sessions.updateSessionStatus(session.id, 'aggregating');
+              sessions.updateSessionStatus(session.id, 'completed');
+              success(`Final snapshot ${currentSnapshot}: ${result.schemas.length} endpoints from ${result.sampleCount} samples`);
+              info(`\nExport with: specwatch export --name "${session.name ?? session.id.slice(0, 8)}"`);
+              info(`Diff snapshots: specwatch diff --name "${session.name ?? session.id.slice(0, 8)}" --snapshots 1 ${currentSnapshot}`);
+            } else {
+              const result = runAggregation(db, session.id);
+              success(`Done! ${formatAggregationSummary(result.schemas, result.sampleCount)}`);
+              info(`\nExport with: specwatch export`);
+            }
           } catch (aggErr) {
             logError(
               `Aggregation failed: ${aggErr instanceof Error ? aggErr.message : String(aggErr)}`,
@@ -463,6 +510,7 @@ export function createProgram(): Command {
     .option('--openapi-version <ver>', 'OpenAPI version: 3.0 or 3.1', '3.1')
     .option('--include-metadata', 'Include x-specwatch-* extensions')
     .option('--name <name>', 'Session name (alternative to session ID)')
+    .option('--snapshot <n>', 'Snapshot number (defaults to latest)')
     .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
       try {
         const db = getDatabase();
@@ -472,10 +520,15 @@ export function createProgram(): Command {
         // Resolve session
         const targetId = resolveSessionId(sessions, sessionId, opts['name'] as string | undefined, 'latest');
 
-        const schemas = schemaRepo.listBySession(targetId);
+        const snapshotOpt = opts['snapshot'] as string | undefined;
+        const schemas = snapshotOpt !== undefined
+          ? schemaRepo.listBySessionSnapshot(targetId, parseInt(snapshotOpt, 10))
+          : schemaRepo.listBySessionLatestSnapshot(targetId);
         if (schemas.length === 0) {
           throw new SpecwatchError(
-            'No schemas found for this session.',
+            snapshotOpt !== undefined
+              ? `No schemas found for snapshot ${snapshotOpt}.`
+              : 'No schemas found for this session.',
             'Run aggregation first: specwatch aggregate',
           );
         }
@@ -565,6 +618,26 @@ export function createProgram(): Command {
       }
     });
 
+  // ========== snapshots ==========
+  program
+    .command('snapshots')
+    .description('List snapshots for a session')
+    .argument('[session]', 'Session ID (defaults to latest completed)')
+    .option('--name <name>', 'Session name (alternative to session ID)')
+    .action((sessionId: string | undefined, opts: Record<string, string | undefined>) => {
+      try {
+        const db = getDatabase();
+        const sessions = new SessionRepository(db);
+        const schemaRepo = new AggregatedSchemaRepository(db);
+
+        const targetId = resolveSessionId(sessions, sessionId, opts['name'], 'latest');
+        const snapshots = schemaRepo.listSnapshotsForSession(targetId);
+        process.stdout.write(formatSnapshotList(snapshots) + '\n');
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
   // ========== diff ==========
   program
     .command('diff')
@@ -573,30 +646,74 @@ export function createProgram(): Command {
     .argument('[session2]', 'Second session ID (newer)')
     .option('--name1 <name>', 'First session name (alternative to session1 ID)')
     .option('--name2 <name>', 'Second session name (alternative to session2 ID)')
+    .option('--name <name>', 'Session name (for comparing snapshots within a session)')
+    .option('--snapshots <numbers...>', 'Compare two snapshots within the same session')
     .action((session1: string | undefined, session2: string | undefined, opts: Record<string, string | undefined>) => {
       try {
         const db = getDatabase();
         const sessions = new SessionRepository(db);
         const schemaRepo = new AggregatedSchemaRepository(db);
 
-        // Resolve both sessions
-        const id1 = resolveSessionId(sessions, session1, opts['name1'], 'none');
-        const id2 = resolveSessionId(sessions, session2, opts['name2'], 'none');
+        let schemas1: AggregatedSchema[];
+        let schemas2: AggregatedSchema[];
 
-        const schemas1 = schemaRepo.listBySession(id1);
-        const schemas2 = schemaRepo.listBySession(id2);
+        const snapshotsOpt = opts['snapshots'] as string[] | undefined;
+        if (snapshotsOpt !== undefined) {
+          // Snapshot comparison within a single session
+          const sessionName = opts['name'] as string | undefined;
+          const targetId = resolveSessionId(sessions, session1, sessionName, 'latest');
 
-        if (schemas1.length === 0) {
-          throw new SpecwatchError(
-            `No schemas found for session '${id1.slice(0, 8)}'.`,
-            'Run aggregation first: specwatch aggregate ' + id1,
-          );
-        }
-        if (schemas2.length === 0) {
-          throw new SpecwatchError(
-            `No schemas found for session '${id2.slice(0, 8)}'.`,
-            'Run aggregation first: specwatch aggregate ' + id2,
-          );
+          // Parse snapshot numbers from variadic option: --snapshots 1 2
+          if (snapshotsOpt.length !== 2) {
+            throw new SpecwatchError(
+              'Exactly two snapshot numbers are required.',
+              'Example: specwatch diff --name bank-demo --snapshots 1 2',
+            );
+          }
+          const snap1 = parseInt(snapshotsOpt[0], 10);
+          const snap2 = parseInt(snapshotsOpt[1], 10);
+          if (isNaN(snap1) || isNaN(snap2)) {
+            throw new SpecwatchError(
+              'Two snapshot numbers are required.',
+              'Example: specwatch diff --name bank-demo --snapshots 1 2',
+            );
+          }
+
+          schemas1 = schemaRepo.listBySessionSnapshot(targetId, snap1);
+          schemas2 = schemaRepo.listBySessionSnapshot(targetId, snap2);
+
+          if (schemas1.length === 0) {
+            throw new SpecwatchError(
+              `No schemas found for snapshot ${snap1}.`,
+              `Available snapshots: 1 to ${schemaRepo.getMaxSnapshotForSession(targetId)}`,
+            );
+          }
+          if (schemas2.length === 0) {
+            throw new SpecwatchError(
+              `No schemas found for snapshot ${snap2}.`,
+              `Available snapshots: 1 to ${schemaRepo.getMaxSnapshotForSession(targetId)}`,
+            );
+          }
+        } else {
+          // Cross-session comparison (original behavior)
+          const id1 = resolveSessionId(sessions, session1, opts['name1'], 'none');
+          const id2 = resolveSessionId(sessions, session2, opts['name2'], 'none');
+
+          schemas1 = schemaRepo.listBySessionLatestSnapshot(id1);
+          schemas2 = schemaRepo.listBySessionLatestSnapshot(id2);
+
+          if (schemas1.length === 0) {
+            throw new SpecwatchError(
+              `No schemas found for session '${id1.slice(0, 8)}'.`,
+              'Run aggregation first: specwatch aggregate ' + id1,
+            );
+          }
+          if (schemas2.length === 0) {
+            throw new SpecwatchError(
+              `No schemas found for session '${id2.slice(0, 8)}'.`,
+              'Run aggregation first: specwatch aggregate ' + id2,
+            );
+          }
         }
 
         // Build map from endpoint key to schema

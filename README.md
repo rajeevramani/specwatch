@@ -18,7 +18,7 @@ It runs as a local reverse proxy. No cloud, no agents, no sidecars. One CLI comm
 ## Quick Start
 
 ```bash
-npx specwatch start https://api.example.com --name "my-api"
+npx specwatch start https://api.example.com --name "my-api" --max-samples 200 --auto-aggregate
 ```
 
 That gives you a local proxy on `localhost:8080`. Use it instead of the real API:
@@ -29,13 +29,15 @@ curl http://localhost:8080/users/123
 curl -X POST http://localhost:8080/users -d '{"name":"Alice"}'
 ```
 
-Hit `Ctrl+C` when you're done. Specwatch aggregates what it learned, then:
+With `--auto-aggregate`, specwatch automatically aggregates every 200 samples and keeps capturing — no need to stop the server. Each aggregation creates a snapshot so you can track how the schema evolves. When you're done, hit `Ctrl+C` for a final aggregation, then:
 
 ```bash
 npx specwatch export --name "my-api" -o openapi.yaml
 ```
 
-You get an OpenAPI 3.1 spec. The more traffic you send through it, the better the spec gets — more fields, tighter types, higher confidence.
+You get an OpenAPI 3.1 spec with schemas extracted into `components/schemas` using `$ref` references. The more traffic you send through it, the better the spec gets — more fields, tighter types, higher confidence.
+
+You can also run without `--auto-aggregate` — just `Ctrl+C` when you're done and specwatch aggregates everything at once.
 
 ## What It Does
 
@@ -62,10 +64,11 @@ Start a proxy session to learn API schemas.
 specwatch start https://api.example.com \
   --port 8080 \          # Local proxy port (default: 8080)
   --name "my-api" \      # Session name (easier to remember than UUIDs)
-  --max-samples 500      # Stop after N samples
+  --max-samples 500 \    # Stop after N samples
+  --auto-aggregate       # Auto-aggregate every --max-samples, keep capturing
 ```
 
-Press `Ctrl+C` to stop and aggregate. Press `Ctrl+C` twice to force-quit without aggregation.
+With `--auto-aggregate`, the proxy aggregates a snapshot every `--max-samples` and continues capturing. Without it, press `Ctrl+C` to stop and aggregate. Press `Ctrl+C` twice to force-quit without aggregation.
 
 ### `specwatch export`
 
@@ -76,6 +79,7 @@ specwatch export                              # Latest session, YAML to stdout
 specwatch export --name "my-api"              # By session name
 specwatch export --name "my-api" -o spec.yaml # Write to file
 specwatch export --json                       # JSON output
+specwatch export --snapshot 2                 # Export a specific snapshot
 specwatch export --openapi-version 3.0        # OpenAPI 3.0.3 (default: 3.1)
 specwatch export --min-confidence 0.8         # Only high-confidence endpoints
 specwatch export --include-metadata           # Add x-specwatch-* extensions
@@ -103,13 +107,23 @@ specwatch aggregate                   # Active session
 specwatch aggregate --name "my-api"   # By name
 ```
 
+### `specwatch snapshots [session-id]`
+
+List snapshots for a session. Snapshots are created each time auto-aggregate runs.
+
+```bash
+specwatch snapshots                   # Active session
+specwatch snapshots --name "my-api"   # By name
+```
+
 ### `specwatch diff <session1> <session2>`
 
-Compare schemas between two sessions to detect breaking changes.
+Compare schemas between two sessions or two snapshots within a session.
 
 ```bash
 specwatch diff abc123 def456
 specwatch diff --name1 "v1" --name2 "v2"
+specwatch diff --name "my-api" --snapshots 1 3   # Compare snapshots within a session
 ```
 
 ## How It Works
@@ -140,7 +154,7 @@ Specwatch has five layers:
 - **Schemas reflect observed traffic, not the full API contract.** If a field is never seen in the captured samples, it won't appear in the spec. More diverse traffic produces better specs.
 - **Monetary/numeric fields may be typed as `integer` instead of `number`** when the server only returns whole numbers in the observed samples. Specwatch infers the narrowest type that fits all observed values.
 - **Enum detection requires sufficient samples.** Fields are only marked as enums when there are enough samples to be confident the observed values represent the full set (>=10 samples, <=10 distinct values).
-- **No database migrations yet.** If you upgrade specwatch and the database schema has changed, delete `~/.specwatch/specwatch.db` and recapture.
+- **Database migrations are automatic.** When you upgrade specwatch, your existing database is migrated automatically. No manual action needed.
 
 ## Requirements
 
@@ -151,7 +165,7 @@ Specwatch has five layers:
 ```bash
 npm install       # Install dependencies
 npm run build     # Build with tsup
-npm run test      # Run tests (719 tests, vitest)
+npm run test      # Run tests (806 tests, vitest)
 npm run lint      # Lint with eslint
 npm run format    # Format with prettier
 ```

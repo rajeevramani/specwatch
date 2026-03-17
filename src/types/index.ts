@@ -8,6 +8,7 @@ export type {
   FieldStats,
   InferredSchema,
   SessionStatus,
+  SessionConsumer,
   Session,
   Sample,
   HeaderEntry,

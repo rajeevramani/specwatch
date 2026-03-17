@@ -4,7 +4,7 @@
  */
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
-import type { Session, SessionStatus } from '../types/index.js';
+import type { Session, SessionConsumer, SessionStatus } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // Row type returned by better-sqlite3 (snake_case columns)
@@ -24,6 +24,7 @@ interface SessionRow {
   skipped_count: number;
   max_samples: number | null;
   error_message: string | null;
+  consumer: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,7 @@ function rowToSession(row: SessionRow): Session {
     skippedCount: row.skipped_count,
     maxSamples: row.max_samples ?? undefined,
     errorMessage: row.error_message ?? undefined,
+    consumer: (row.consumer as SessionConsumer) ?? 'human',
   };
 }
 
@@ -76,18 +78,18 @@ export class SessionRepository {
    * @param name - Optional user-provided session name
    * @param maxSamples - Optional cap on number of samples
    */
-  createSession(targetUrl: string, port: number, name?: string, maxSamples?: number): Session {
+  createSession(targetUrl: string, port: number, name?: string, maxSamples?: number, consumer?: SessionConsumer): Session {
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
 
     this.db
       .prepare(
         `INSERT INTO sessions
-           (id, name, target_url, port, status, created_at, sample_count, skipped_count, max_samples)
+           (id, name, target_url, port, status, created_at, sample_count, skipped_count, max_samples, consumer)
          VALUES
-           (?, ?, ?, ?, 'active', ?, 0, 0, ?)`,
+           (?, ?, ?, ?, 'active', ?, 0, 0, ?, ?)`,
       )
-      .run(id, name ?? null, targetUrl, port, createdAt, maxSamples ?? null);
+      .run(id, name ?? null, targetUrl, port, createdAt, maxSamples ?? null, consumer ?? 'human');
 
     return this.getSession(id) as Session;
   }

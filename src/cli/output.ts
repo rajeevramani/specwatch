@@ -60,6 +60,7 @@ export function formatStatus(session: Session): string {
   lines.push(`Proxy:   http://localhost:${session.port}`);
   lines.push(`Samples: ${session.sampleCount}${session.skippedCount > 0 ? ` (${session.skippedCount} skipped)` : ''}`);
   if (session.maxSamples) lines.push(`Max:     ${session.maxSamples}`);
+  if (session.consumer === 'agent') lines.push(`Consumer: agent`);
   lines.push(`Created: ${session.createdAt}`);
   if (session.errorMessage) lines.push(`Error:   ${session.errorMessage}`);
   return lines.join('\n');

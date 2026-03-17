@@ -123,10 +123,21 @@ const INITIAL_SCHEMA: Migration = {
  *     },
  *   }
  */
+// ---------------------------------------------------------------------------
+// v2 — Add consumer column to sessions
+// ---------------------------------------------------------------------------
+
+const ADD_CONSUMER_COLUMN: Migration = {
+  version: 2,
+  description: 'Add consumer column to sessions table',
+  up: (db) => {
+    db.exec(`ALTER TABLE sessions ADD COLUMN consumer TEXT NOT NULL DEFAULT 'human'`);
+  },
+};
+
 export const MIGRATIONS: Migration[] = [
   INITIAL_SCHEMA,
-  // Future migrations go here, e.g.:
-  // { version: 2, description: '...', up: (db) => { ... } },
+  ADD_CONSUMER_COLUMN,
 ];
 
 /** The schema version that a fully-migrated database should be at. */

@@ -54,6 +54,9 @@ export interface InferredSchema {
 /** Session lifecycle states */
 export type SessionStatus = 'active' | 'aggregating' | 'completed' | 'failed';
 
+/** Valid consumer types for a session */
+export type SessionConsumer = 'human' | 'agent';
+
 /** A proxy capture session */
 export interface Session {
   /** UUID identifier */
@@ -82,6 +85,8 @@ export interface Session {
   maxSamples?: number;
   /** Error message if session failed */
   errorMessage?: string;
+  /** Who is consuming this session: 'human' (default) or 'agent' */
+  consumer?: SessionConsumer;
 }
 
 // === Sample Types ===

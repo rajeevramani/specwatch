@@ -40,7 +40,7 @@ import {
   formatSnapshotList,
 } from './output.js';
 import { SpecwatchError, noActiveSessionError, sessionNotFoundError, sessionNameNotFoundError, noCompletedSessionsError } from './errors.js';
-import type { ExportOptions, AggregatedSchema } from '../types/index.js';
+import type { ExportOptions, AggregatedSchema, SessionConsumer } from '../types/index.js';
 
 /**
  * Resolve a session by ID, name, or fallback strategy.
@@ -128,6 +128,7 @@ export function createProgram(): Command {
     .option('-n, --name <name>', 'Session name')
     .option('--max-samples <count>', 'Maximum samples to capture')
     .option('--auto-aggregate', 'Auto-aggregate every --max-samples and continue capturing')
+    .option('--consumer <type>', 'Consumer type: human or agent', 'human')
     .action(async (url: string, opts: Record<string, string>) => {
       try {
         const port = parseInt(opts['port'], 10);
@@ -136,6 +137,13 @@ export function createProgram(): Command {
         }
 
         const maxSamples = opts['maxSamples'] ? parseInt(opts['maxSamples'], 10) : undefined;
+        const consumer = opts['consumer'] as string;
+        if (consumer !== 'human' && consumer !== 'agent') {
+          throw new SpecwatchError(
+            `Invalid consumer type: '${consumer}'.`,
+            "Use --consumer human or --consumer agent.",
+          );
+        }
         const autoAggregate = opts['autoAggregate'] === true || opts['autoAggregate'] === '';
         if (autoAggregate && maxSamples === undefined) {
           throw new SpecwatchError(
@@ -169,7 +177,7 @@ export function createProgram(): Command {
           );
         }
 
-        const session = sessions.createSession(targetUrl, port, opts['name'], maxSamples);
+        const session = sessions.createSession(targetUrl, port, opts['name'], maxSamples, consumer as SessionConsumer);
 
         const _proxy = new ProxyServer({
           targetUrl,

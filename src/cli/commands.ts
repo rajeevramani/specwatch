@@ -25,6 +25,10 @@ import { runAggregation } from '../aggregation/pipeline.js';
 import { detectBreakingChanges } from '../aggregation/diff.js';
 import { buildOpenApiDocument, serializeOpenApi, convertToOpenApi30 } from '../export/openapi.js';
 import { buildJsonExport, serializeJson } from '../export/json.js';
+import { detectSequences } from '../analysis/sequences.js';
+import { analyzeCompleteness } from '../analysis/completeness.js';
+import { buildAgentExtensions } from '../analysis/agent-extensions.js';
+import type { AgentExtension } from '../analysis/agent-extensions.js';
 import {
   info,
   success,
@@ -566,7 +570,19 @@ export function createProgram(): Command {
             includeMetadata: opts['includeMetadata'] === true,
           };
 
-          let doc = buildOpenApiDocument(filtered, exportOptions);
+          // Build agent extensions for agent sessions
+          let agentExtensionsMap: Record<string, AgentExtension> | undefined;
+          const session = sessions.getSession(targetId);
+          if (session?.consumer === 'agent') {
+            const sequenceAnalysis = detectSequences(db, targetId);
+            const completenessReport = analyzeCompleteness(filtered);
+            agentExtensionsMap = buildAgentExtensions(sequenceAnalysis, completenessReport);
+            if (Object.keys(agentExtensionsMap).length === 0) {
+              agentExtensionsMap = undefined;
+            }
+          }
+
+          let doc = buildOpenApiDocument(filtered, exportOptions, agentExtensionsMap);
           const openapiVersion = opts['openapiVersion'] as string | undefined;
           if (openapiVersion === '3.0') {
             doc = convertToOpenApi30(doc);

@@ -11,6 +11,7 @@
 
 import yaml from 'js-yaml';
 import type { InferredSchema, AggregatedSchema, ExportOptions, HeaderEntry } from '../types/index.js';
+import type { AgentExtension } from '../analysis/agent-extensions.js';
 
 // ============================================================
 // Schema Name Generation & $ref Extraction
@@ -353,6 +354,7 @@ export function buildPathsObject(
   options: Partial<ExportOptions> = {},
   globalHeaders: Set<string> = new Set(),
   collector?: SchemaCollector,
+  agentExtensions?: Record<string, AgentExtension>,
 ): Record<string, unknown> {
   const paths: Record<string, Record<string, unknown>> = {};
 
@@ -362,7 +364,7 @@ export function buildPathsObject(
       paths[pathKey] = {};
     }
 
-    const operation = buildOperationObject(schema, options, globalHeaders, collector);
+    const operation = buildOperationObject(schema, options, globalHeaders, collector, agentExtensions);
     paths[pathKey][schema.httpMethod.toLowerCase()] = operation;
   }
 
@@ -394,6 +396,7 @@ export function buildOperationObject(
   options: Partial<ExportOptions> = {},
   globalHeaders: Set<string> = new Set(),
   collector?: SchemaCollector,
+  agentExtensions?: Record<string, AgentExtension>,
 ): Record<string, unknown> {
   const operation: Record<string, unknown> = {};
 
@@ -490,6 +493,15 @@ export function buildOperationObject(
   }
 
   operation['responses'] = responses;
+
+  // Attach agent analysis extension if available for this endpoint
+  if (agentExtensions !== undefined) {
+    const endpointKey = `${schema.httpMethod} ${schema.path}`;
+    const agentExt = agentExtensions[endpointKey];
+    if (agentExt !== undefined && Object.keys(agentExt).length > 0) {
+      operation['x-specwatch-agent'] = agentExt;
+    }
+  }
 
   // Add metadata extensions if requested
   if (options.includeMetadata === true) {
@@ -699,6 +711,7 @@ export function detectSecuritySchemes(
 export function buildOpenApiDocument(
   schemas: AggregatedSchema[],
   options: Partial<ExportOptions> = {},
+  agentExtensions?: Record<string, AgentExtension>,
 ): Record<string, unknown> {
   const title = options.title ?? 'API';
   const version = options.version ?? '1.0.0';
@@ -715,7 +728,7 @@ export function buildOpenApiDocument(
 
   // Create a collector for $ref extraction (always enabled)
   const collector = createSchemaCollector();
-  const paths = buildPathsObject(schemas, options, globalHeaderNames, collector);
+  const paths = buildPathsObject(schemas, options, globalHeaderNames, collector, agentExtensions);
 
   const doc: Record<string, unknown> = {
     openapi: '3.1.0',

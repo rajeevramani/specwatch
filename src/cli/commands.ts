@@ -42,6 +42,7 @@ import {
   formatAggregationSummary,
   formatDiff,
   formatSnapshotList,
+  formatAgentReport,
 } from './output.js';
 import { SpecwatchError, noActiveSessionError, sessionNotFoundError, sessionNameNotFoundError, noCompletedSessionsError } from './errors.js';
 import type { ExportOptions, AggregatedSchema, SessionConsumer } from '../types/index.js';
@@ -789,6 +790,57 @@ export function createProgram(): Command {
         if (!hasChanges) {
           info('No differences found between the two sessions.');
         }
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  // ========== agent-report ==========
+  program
+    .command('agent-report')
+    .description('Analyze agent traffic patterns and API friendliness')
+    .argument('[session-id]', 'Session ID (defaults to latest completed)')
+    .option('--name <name>', 'Session name')
+    .action((sessionId: string | undefined, opts: Record<string, string | undefined>) => {
+      try {
+        const db = getDatabase();
+        const sessions = new SessionRepository(db);
+        const schemaRepo = new AggregatedSchemaRepository(db);
+
+        // Resolve session (same pattern as export command)
+        const targetId = resolveSessionId(sessions, sessionId, opts['name'], 'latest');
+        const session = sessions.getSession(targetId)!;
+
+        // Validate consumer type
+        if (session.consumer !== 'agent') {
+          throw new SpecwatchError(
+            'agent-report requires a session captured with --consumer agent',
+            'Start a session with: specwatch start <url> --consumer agent',
+          );
+        }
+
+        // Get aggregated schemas
+        const schemas = schemaRepo.listBySessionLatestSnapshot(targetId);
+        if (schemas.length === 0) {
+          throw new SpecwatchError(
+            'No schemas found for this session.',
+            'Run aggregation first: specwatch aggregate',
+          );
+        }
+
+        // Run analysis
+        const sequenceAnalysis = detectSequences(db, targetId);
+        const completenessReport = analyzeCompleteness(schemas);
+
+        // Format and output
+        const sessionName = session.name ?? session.id.slice(0, 8);
+        const output = formatAgentReport(
+          sessionName,
+          sequenceAnalysis,
+          completenessReport,
+          session.sampleCount,
+        );
+        process.stdout.write(output + '\n');
       } catch (err) {
         handleError(err);
       }

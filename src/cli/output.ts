@@ -6,6 +6,8 @@
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { Session, AggregatedSchema, SchemaDiff } from '../types/index.js';
+import type { SequenceAnalysis } from '../analysis/sequences.js';
+import type { CompletenessReport } from '../analysis/completeness.js';
 
 let verboseMode = false;
 let quietMode = false;
@@ -178,6 +180,71 @@ export function formatDiff(diff: SchemaDiff, endpoint?: string): string {
       lines.push(`    [INFO] ${change}`);
     }
   }
+
+  return lines.join('\n');
+}
+
+export function formatAgentReport(
+  sessionName: string,
+  sequenceAnalysis: SequenceAnalysis,
+  completenessReport: CompletenessReport,
+  totalSamples: number,
+): string {
+  const lines: string[] = [];
+  const endpointCount = completenessReport.endpoints.length;
+
+  lines.push(
+    `Agent-Friendliness Report: ${sessionName} (${totalSamples} samples, ${endpointCount} endpoints)`,
+  );
+
+  // Verification loops section
+  lines.push('');
+  lines.push('VERIFICATION LOOPS');
+  const loops = [...sequenceAnalysis.verificationLoops].sort((a, b) => b.count - a.count);
+  if (loops.length === 0) {
+    lines.push('  No verification loops detected.');
+  } else {
+    for (const loop of loops) {
+      lines.push(`  ${loop.fromMethod} ${loop.fromPath} → ${loop.toMethod} ${loop.toPath}`);
+      lines.push(`    ${loop.count} occurrences, avg ${loop.avgDelayMs}ms delay`);
+      lines.push(
+        `    → Enrich ${loop.fromMethod} response to eliminate redundant ${loop.toMethod}`,
+      );
+    }
+  }
+
+  // Thin responses section
+  lines.push('');
+  lines.push('THIN RESPONSES');
+  const thin = [...completenessReport.thinResponses].sort(
+    (a, b) => a.completenessScore - b.completenessScore,
+  );
+  if (thin.length === 0) {
+    lines.push('  All write responses return adequate data.');
+  } else {
+    for (const endpoint of thin) {
+      const pct = Math.round(endpoint.completenessScore * 100);
+      lines.push(
+        `  ${endpoint.method} ${endpoint.path} — ${pct}% complete (${endpoint.writeFieldCount} of ${endpoint.readFieldCount} fields)`,
+      );
+      if (endpoint.missingFields.length > 0) {
+        const MAX_FIELDS = 5;
+        const shown = endpoint.missingFields.slice(0, MAX_FIELDS);
+        const remaining = endpoint.missingFields.length - MAX_FIELDS;
+        const fieldList =
+          remaining > 0 ? `${shown.join(', ')}, ... and ${remaining} more` : shown.join(', ');
+        lines.push(`    Missing: ${fieldList}`);
+      }
+    }
+  }
+
+  // Summary section
+  lines.push('');
+  lines.push('SUMMARY');
+  const { totalRequests, wastedRequests } = sequenceAnalysis;
+  const wastedPct = totalRequests > 0 ? Math.round((wastedRequests / totalRequests) * 100) : 0;
+  lines.push(`  Wasted requests: ${wastedRequests} of ${totalRequests} (${wastedPct}%)`);
+  lines.push(`  Avg response completeness: ${completenessReport.avgCompleteness.toFixed(2)}`);
 
   return lines.join('\n');
 }

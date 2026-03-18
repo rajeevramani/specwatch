@@ -180,4 +180,99 @@ describe('formatAgentReport', () => {
     const ordersIdx = output.indexOf('POST /orders');
     expect(usersIdx).toBeLessThan(ordersIdx);
   });
+
+  it('formats JSON-RPC verification loops with tool names', () => {
+    const loop: OperationSequence = {
+      fromMethod: 'tools/call',
+      fromPath: 'tools/call:create_cluster',
+      toMethod: 'tools/call',
+      toPath: 'tools/call:get_cluster',
+      avgDelayMs: 600,
+      count: 8,
+      pattern: 'verification_loop',
+    };
+    const analysis: SequenceAnalysis = {
+      sequences: [loop],
+      verificationLoops: [loop],
+      totalRequests: 30,
+      wastedRequests: 8,
+    };
+    const completeness: CompletenessReport = {
+      endpoints: [],
+      thinResponses: [],
+      avgCompleteness: 0,
+    };
+
+    const output = formatAgentReport('mcp-api', analysis, completeness, 30);
+
+    expect(output).toContain('tools/call:create_cluster → tools/call:get_cluster');
+    expect(output).toContain('8 occurrences, avg 600ms delay');
+    expect(output).toContain('→ Enrich write tool response to eliminate redundant read');
+    // Should NOT show HTTP method format
+    expect(output).not.toContain('POST tools/call');
+  });
+
+  it('formats JSON-RPC retry pattern', () => {
+    const loop: OperationSequence = {
+      fromMethod: 'tools/call',
+      fromPath: 'tools/call:create_cluster',
+      toMethod: 'tools/call',
+      toPath: 'tools/call:create_cluster',
+      avgDelayMs: 200,
+      count: 3,
+      pattern: 'retry',
+    };
+    const analysis: SequenceAnalysis = {
+      sequences: [loop],
+      verificationLoops: [loop],
+      totalRequests: 10,
+      wastedRequests: 3,
+    };
+    const completeness: CompletenessReport = {
+      endpoints: [],
+      thinResponses: [],
+      avgCompleteness: 0,
+    };
+
+    const output = formatAgentReport('mcp-api', analysis, completeness, 10);
+    expect(output).toContain('→ Tool is being retried — check error handling');
+  });
+
+  it('formats JSON-RPC thin responses with tool names', () => {
+    const thin: ResponseCompleteness = {
+      method: 'tools/call',
+      path: 'tools/call:create_cluster',
+      writeFieldCount: 2,
+      readFieldCount: 10,
+      completenessScore: 0.2,
+      missingFields: ['status', 'region', 'ports'],
+    };
+    const analysis: SequenceAnalysis = {
+      sequences: [
+        {
+          fromMethod: 'tools/call',
+          fromPath: 'tools/call:create_cluster',
+          toMethod: 'tools/call',
+          toPath: 'tools/call:get_cluster',
+          avgDelayMs: 100,
+          count: 1,
+          pattern: 'verification_loop',
+        },
+      ],
+      verificationLoops: [],
+      totalRequests: 5,
+      wastedRequests: 0,
+    };
+    const completeness: CompletenessReport = {
+      endpoints: [thin],
+      thinResponses: [thin],
+      avgCompleteness: 0.2,
+    };
+
+    const output = formatAgentReport('mcp-api', analysis, completeness, 15);
+
+    // JSON-RPC format: shows operation key, not "METHOD path"
+    expect(output).toContain('tools/call:create_cluster — 20% complete (2 of 10 fields)');
+    expect(output).toContain('Missing: status, region, ports');
+  });
 });

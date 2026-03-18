@@ -226,6 +226,58 @@ describe('buildAgentExtensions', () => {
     expect(ext.commonNextSteps).toEqual(['GET /orders/{orderId}']);
   });
 
+  it('keys by tool name for JSON-RPC sessions', () => {
+    const seqAnalysis: SequenceAnalysis = {
+      sequences: [
+        {
+          fromMethod: 'tools/call',
+          fromPath: 'tools/call:create_cluster',
+          toMethod: 'tools/call',
+          toPath: 'tools/call:get_cluster',
+          avgDelayMs: 600,
+          count: 8,
+          pattern: 'verification_loop',
+        },
+      ],
+      verificationLoops: [
+        {
+          fromMethod: 'tools/call',
+          fromPath: 'tools/call:create_cluster',
+          toMethod: 'tools/call',
+          toPath: 'tools/call:get_cluster',
+          avgDelayMs: 600,
+          count: 8,
+          pattern: 'verification_loop',
+        },
+      ],
+      totalRequests: 30,
+      wastedRequests: 8,
+    };
+
+    const report: CompletenessReport = {
+      endpoints: [
+        {
+          method: 'tools/call',
+          path: 'tools/call:create_cluster',
+          writeFieldCount: 2,
+          readFieldCount: 10,
+          completenessScore: 0.2,
+          missingFields: ['status', 'region'],
+        },
+      ],
+      thinResponses: [],
+      avgCompleteness: 0.2,
+    };
+
+    const result = buildAgentExtensions(seqAnalysis, report);
+    const key = 'tools/call tools/call:create_cluster';
+    expect(result[key]).toBeDefined();
+    expect(result[key].responseCompleteness).toBe(0.2);
+    expect(result[key].verificationLoopDetected).toBe(true);
+    expect(result[key].verificationLoopCount).toBe(8);
+    expect(result[key].commonNextSteps).toEqual(['tools/call tools/call:get_cluster']);
+  });
+
   it('endpoints with no analysis data have no extension', () => {
     const seqAnalysis: SequenceAnalysis = {
       sequences: [

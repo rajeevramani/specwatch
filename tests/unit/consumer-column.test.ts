@@ -62,7 +62,7 @@ describe('consumer column migration', () => {
     // Now apply all migrations (should run v2)
     applyMigrations(rawDb);
 
-    expect(getSchemaVersion(rawDb)).toBe(2);
+    expect(getSchemaVersion(rawDb)).toBe(MIGRATIONS.length);
 
     // The existing session should have consumer='human' (the DEFAULT)
     const row = rawDb.prepare('SELECT consumer FROM sessions WHERE id = ?').get('old-session-id') as { consumer: string };
@@ -76,7 +76,7 @@ describe('consumer column migration', () => {
     rawDb.close();
   });
 
-  it('schema version is 2 after full migration', () => {
-    expect(getSchemaVersion(db)).toBe(2);
+  it('schema version matches MIGRATIONS.length after full migration', () => {
+    expect(getSchemaVersion(db)).toBe(MIGRATIONS.length);
   });
 });

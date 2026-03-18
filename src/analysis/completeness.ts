@@ -3,7 +3,8 @@
  * against read (GET) responses for the same resource to flag thin responses
  * that force agents into verification loops.
  */
-import type { AggregatedSchema, InferredSchema } from '../types/index.js';
+import type { AggregatedSchema, InferredSchema, Sample } from '../types/index.js';
+import { isJsonRpcSession, extractJsonRpcOperation } from './jsonrpc.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -183,4 +184,137 @@ export function analyzeCompleteness(
       : 0;
 
   return { endpoints, thinResponses, avgCompleteness };
+}
+
+// ---------------------------------------------------------------------------
+// JSON-RPC tool name matching
+// ---------------------------------------------------------------------------
+
+const WRITE_PREFIXES = /^(create|set|update|put|patch|add|insert|upsert|delete|remove)[-_]/i;
+const READ_PREFIXES = /^(get|query|read|describe|list|fetch|show|find|lookup)[-_]/i;
+
+/**
+ * Check if a tool name is a write-like operation.
+ */
+export function isWriteTool(toolName: string): boolean {
+  return WRITE_PREFIXES.test(toolName);
+}
+
+/**
+ * Check if a tool name is a read-like operation.
+ */
+export function isReadTool(toolName: string): boolean {
+  return READ_PREFIXES.test(toolName);
+}
+
+/**
+ * Extract the resource suffix from a tool name (e.g., "create_cluster" → "cluster").
+ */
+function getToolResourceSuffix(toolName: string): string {
+  return toolName.replace(WRITE_PREFIXES, '').replace(READ_PREFIXES, '');
+}
+
+/**
+ * Find a matching read tool for a write tool.
+ * Matches by shared resource suffix (e.g., create_cluster → get_cluster).
+ */
+export function findMatchingReadTool(
+  writeTool: string,
+  readTools: string[],
+): string | undefined {
+  const suffix = getToolResourceSuffix(writeTool);
+  return readTools.find((rt) => getToolResourceSuffix(rt) === suffix);
+}
+
+// ---------------------------------------------------------------------------
+// JSON-RPC completeness analysis
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyze response completeness for JSON-RPC sessions.
+ * Groups samples by tool name, compares write-tool responses against
+ * matching read-tool responses.
+ */
+export function analyzeJsonRpcCompleteness(
+  samples: Sample[],
+): CompletenessReport {
+  // Group samples by tool name and collect response schemas
+  const toolResponses = new Map<string, InferredSchema[]>();
+
+  for (const sample of samples) {
+    const op = extractJsonRpcOperation(sample);
+    if (!op || !op.toolName) continue;
+    if (!sample.responseSchema) continue;
+
+    const existing = toolResponses.get(op.toolName) ?? [];
+    existing.push(sample.responseSchema);
+    toolResponses.set(op.toolName, existing);
+  }
+
+  // Identify write and read tools
+  const writeTools: string[] = [];
+  const readTools: string[] = [];
+  for (const toolName of toolResponses.keys()) {
+    if (isWriteTool(toolName)) writeTools.push(toolName);
+    if (isReadTool(toolName)) readTools.push(toolName);
+  }
+
+  const endpoints: ResponseCompleteness[] = [];
+
+  for (const writeTool of writeTools) {
+    const matchingRead = findMatchingReadTool(writeTool, readTools);
+    if (!matchingRead) continue;
+
+    // Use the first response schema from each tool for comparison
+    const writeSchemas = toolResponses.get(writeTool)!;
+    const readSchemas = toolResponses.get(matchingRead)!;
+
+    // Pick the schema with the most fields as representative
+    const writeResponse = pickRichestSchema(writeSchemas);
+    const readResponse = pickRichestSchema(readSchemas);
+
+    if (!writeResponse || !readResponse) continue;
+
+    const writeFields = extractFields(writeResponse);
+    const readFields = extractFields(readResponse);
+
+    if (readFields.length === 0) continue;
+
+    const writeFieldSet = new Set(writeFields);
+    const missingFields = readFields.filter((f) => !writeFieldSet.has(f));
+    const completenessScore = Math.min(writeFields.length / readFields.length, 1.0);
+
+    endpoints.push({
+      method: 'tools/call',
+      path: `tools/call:${writeTool}`,
+      writeFieldCount: writeFields.length,
+      readFieldCount: readFields.length,
+      completenessScore,
+      missingFields,
+    });
+  }
+
+  const thinResponses = endpoints.filter((e) => e.completenessScore < 0.5);
+  const avgCompleteness =
+    endpoints.length > 0
+      ? endpoints.reduce((sum, e) => sum + e.completenessScore, 0) / endpoints.length
+      : 0;
+
+  return { endpoints, thinResponses, avgCompleteness };
+}
+
+/**
+ * Pick the schema with the most top-level fields from a list.
+ */
+function pickRichestSchema(schemas: InferredSchema[]): InferredSchema | undefined {
+  let best: InferredSchema | undefined;
+  let bestCount = -1;
+  for (const s of schemas) {
+    const count = extractFields(s).length;
+    if (count > bestCount) {
+      best = s;
+      bestCount = count;
+    }
+  }
+  return best;
 }

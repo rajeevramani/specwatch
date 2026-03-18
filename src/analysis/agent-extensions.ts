@@ -23,7 +23,8 @@ export interface AgentExtension {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a map of agent extensions keyed by "METHOD /path".
+ * Build a map of agent extensions keyed by "METHOD /path" (REST) or
+ * operation key like "tools/call:tool_name" (JSON-RPC).
  *
  * Only includes fields that have meaningful data. Returns an empty record
  * if neither analysis produces actionable results.
@@ -31,12 +32,17 @@ export interface AgentExtension {
 export function buildAgentExtensions(
   sequenceAnalysis: SequenceAnalysis,
   completenessReport: CompletenessReport,
+  isJsonRpc = false,
 ): Record<string, AgentExtension> {
   const extensions: Record<string, AgentExtension> = {};
 
   // --- Completeness data (keyed by write endpoint) ---
   for (const endpoint of completenessReport.endpoints) {
-    const key = `${endpoint.method} ${endpoint.path}`;
+    // JSON-RPC: path is tool name (e.g. "cp_create_cluster"), key as "tools/call:tool_name"
+    // REST: key as "METHOD /path"
+    const key = isJsonRpc
+      ? `tools/call:${endpoint.path}`
+      : `${endpoint.method} ${endpoint.path}`;
     const ext: AgentExtension = {};
 
     ext.responseCompleteness = Math.round(endpoint.completenessScore * 100) / 100;
@@ -50,7 +56,9 @@ export function buildAgentExtensions(
 
   // --- Verification loop data (keyed by the "from" write endpoint) ---
   for (const loop of sequenceAnalysis.verificationLoops) {
-    const key = `${loop.fromMethod} ${loop.fromPath}`;
+    // JSON-RPC: fromPath is already the operation key (e.g. "tools/call:cp_create_cluster")
+    // REST: key as "METHOD /path"
+    const key = isJsonRpc ? loop.fromPath : `${loop.fromMethod} ${loop.fromPath}`;
     const ext = extensions[key] ?? {};
 
     ext.verificationLoopDetected = true;
@@ -63,8 +71,8 @@ export function buildAgentExtensions(
   // Group sequences by their "from" endpoint to collect next steps
   const nextStepsMap = new Map<string, string[]>();
   for (const seq of sequenceAnalysis.sequences) {
-    const key = `${seq.fromMethod} ${seq.fromPath}`;
-    const step = `${seq.toMethod} ${seq.toPath}`;
+    const key = isJsonRpc ? seq.fromPath : `${seq.fromMethod} ${seq.fromPath}`;
+    const step = isJsonRpc ? seq.toPath : `${seq.toMethod} ${seq.toPath}`;
     const steps = nextStepsMap.get(key) ?? [];
     steps.push(step);
     nextStepsMap.set(key, steps);

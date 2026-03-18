@@ -26,8 +26,9 @@ import { detectBreakingChanges } from '../aggregation/diff.js';
 import { buildOpenApiDocument, serializeOpenApi, convertToOpenApi30 } from '../export/openapi.js';
 import { buildJsonExport, serializeJson } from '../export/json.js';
 import { detectSequences } from '../analysis/sequences.js';
-import { analyzeCompleteness } from '../analysis/completeness.js';
+import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/completeness.js';
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
+import { extractJsonRpcFromBody, isJsonRpcSession } from '../analysis/jsonrpc.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
 import {
   info,
@@ -283,6 +284,9 @@ export function createProgram(): Command {
             // Parse query params
             const queryParams = parseQueryParams(pair.url);
 
+            // Extract JSON-RPC method and tool name if present
+            const jsonrpc = extractJsonRpcFromBody(pair.requestBody);
+
             // Insert sample
             sampleRepo.insertSample({
               sessionId: session.id,
@@ -296,6 +300,8 @@ export function createProgram(): Command {
               requestHeaders: pair.requestHeaders,
               responseHeaders: pair.responseHeaders,
               capturedAt: pair.capturedAt,
+              jsonrpcMethod: jsonrpc?.method,
+              jsonrpcTool: jsonrpc?.tool,
             });
 
             sessions.incrementSampleCount(session.id);
@@ -576,8 +582,17 @@ export function createProgram(): Command {
           const session = sessions.getSession(targetId);
           if (session?.consumer === 'agent') {
             const sequenceAnalysis = detectSequences(db, targetId);
-            const completenessReport = analyzeCompleteness(filtered);
-            agentExtensionsMap = buildAgentExtensions(sequenceAnalysis, completenessReport);
+            const sampleRepo = new SampleRepository(db);
+            const samples = sampleRepo.listBySession(targetId);
+            const jsonRpc = isJsonRpcSession(samples);
+            const completenessReport = jsonRpc
+              ? analyzeJsonRpcCompleteness(samples)
+              : analyzeCompleteness(filtered);
+            agentExtensionsMap = buildAgentExtensions(
+              sequenceAnalysis,
+              completenessReport,
+              jsonRpc,
+            );
             if (Object.keys(agentExtensionsMap).length === 0) {
               agentExtensionsMap = undefined;
             }
@@ -828,9 +843,13 @@ export function createProgram(): Command {
           );
         }
 
-        // Run analysis
+        // Run analysis — use JSON-RPC completeness for MCP-style sessions
         const sequenceAnalysis = detectSequences(db, targetId);
-        const completenessReport = analyzeCompleteness(schemas);
+        const sampleRepo = new SampleRepository(db);
+        const samples = sampleRepo.listBySession(targetId);
+        const completenessReport = isJsonRpcSession(samples)
+          ? analyzeJsonRpcCompleteness(samples)
+          : analyzeCompleteness(schemas);
 
         // Format and output
         const sessionName = session.name ?? session.id.slice(0, 8);

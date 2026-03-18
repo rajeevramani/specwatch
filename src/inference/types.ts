@@ -117,6 +117,10 @@ export interface Sample {
   responseHeaders?: HeaderEntry[];
   /** ISO 8601 timestamp of when this sample was captured */
   capturedAt: string;
+  /** JSON-RPC method name (e.g., "tools/call", "initialize") — only for JSON-RPC traffic */
+  jsonrpcMethod?: string;
+  /** JSON-RPC tool name (e.g., "cp_create_cluster") — only for tools/call requests */
+  jsonrpcTool?: string;
 }
 
 /** A captured HTTP header with name and example value */

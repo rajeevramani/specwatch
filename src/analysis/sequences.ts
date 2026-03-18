@@ -6,6 +6,8 @@
 import type Database from 'better-sqlite3';
 import { SessionRepository } from '../storage/sessions.js';
 import { SampleRepository } from '../storage/samples.js';
+import { isJsonRpcSession, extractJsonRpcOperation } from './jsonrpc.js';
+import type { Sample } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,6 +18,8 @@ export type SequencePattern =
   | 'verification_loop'
   | 'create_chain'
   | 'list_after_create'
+  | 'redundant_list'
+  | 'retry'
   | 'unknown';
 
 /** A pair of consecutive operations within a session. */
@@ -141,6 +145,55 @@ export function classifyPattern(
 }
 
 // ---------------------------------------------------------------------------
+// JSON-RPC pattern classification
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a pair of consecutive JSON-RPC operations into a known pattern.
+ */
+export function classifyJsonRpcPattern(
+  fromKey: string,
+  toKey: string,
+): SequencePattern {
+  // retry: same tool called consecutively (e.g., tools/call:my_tool → tools/call:my_tool)
+  if (fromKey === toKey && fromKey.startsWith('tools/call:')) {
+    return 'retry';
+  }
+
+  // redundant_list: tools/list called multiple times
+  if (fromKey === 'tools/list' && toKey === 'tools/list') {
+    return 'redundant_list';
+  }
+
+  // verification_loop: tools/call:create_X → tools/call:query_X or get_X
+  // Detect create→query pattern by looking at tool name prefixes
+  const fromParts = fromKey.split(':');
+  const toParts = toKey.split(':');
+  if (
+    fromParts[0] === 'tools/call' &&
+    toParts[0] === 'tools/call' &&
+    fromParts[1] &&
+    toParts[1]
+  ) {
+    const fromTool = fromParts[1];
+    const toTool = toParts[1];
+    // create/set/update → get/query/read/describe/list on same resource type
+    const writePrefix = /^(create|set|update|put|patch|add|insert|upsert)[-_]/i;
+    const readPrefix = /^(get|query|read|describe|list|fetch|show|find|lookup)[-_]/i;
+    if (writePrefix.test(fromTool) && readPrefix.test(toTool)) {
+      // Check if they share a resource suffix
+      const fromSuffix = fromTool.replace(writePrefix, '');
+      const toSuffix = toTool.replace(readPrefix, '');
+      if (fromSuffix === toSuffix) {
+        return 'verification_loop';
+      }
+    }
+  }
+
+  return 'unknown';
+}
+
+// ---------------------------------------------------------------------------
 // Sequence detection
 // ---------------------------------------------------------------------------
 
@@ -152,9 +205,26 @@ function sequenceKeyString(key: SequenceKey): string {
 }
 
 /**
+ * Get the operation key for a sample — uses JSON-RPC operation key for
+ * JSON-RPC sessions, or "METHOD /path" for REST sessions.
+ */
+function getOperationKey(sample: Sample, jsonrpc: boolean): { method: string; path: string } {
+  if (jsonrpc) {
+    const op = extractJsonRpcOperation(sample);
+    if (op) {
+      return { method: op.rpcMethod, path: op.operationKey };
+    }
+  }
+  return { method: sample.httpMethod, path: sample.normalizedPath };
+}
+
+/**
  * Detect operation sequences from samples in a session.
  * Queries samples ordered by captured_at, builds pairs of consecutive requests,
  * groups by (from→to), counts occurrences, and calculates average delay.
+ *
+ * For JSON-RPC sessions, groups by operation key (e.g., "tools/call:my_tool")
+ * instead of HTTP method + path.
  *
  * Only analyzes sessions where consumer = 'agent'.
  */
@@ -182,6 +252,8 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
     };
   }
 
+  const jsonrpc = isJsonRpcSession(samples);
+
   // Group consecutive pairs
   const accumulators = new Map<string, SequenceAccumulator>();
 
@@ -189,11 +261,14 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
     const from = samples[i];
     const to = samples[i + 1];
 
+    const fromOp = getOperationKey(from, jsonrpc);
+    const toOp = getOperationKey(to, jsonrpc);
+
     const key: SequenceKey = {
-      fromMethod: from.httpMethod,
-      fromPath: from.normalizedPath,
-      toMethod: to.httpMethod,
-      toPath: to.normalizedPath,
+      fromMethod: fromOp.method,
+      fromPath: fromOp.path,
+      toMethod: toOp.method,
+      toPath: toOp.path,
     };
 
     const keyStr = sequenceKeyString(key);
@@ -213,13 +288,16 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
 
   for (const acc of accumulators.values()) {
     const avgDelayMs = acc.delays.reduce((sum, d) => sum + d, 0) / acc.delays.length;
-    const pattern = classifyPattern(
-      acc.key.fromMethod,
-      acc.key.fromPath,
-      acc.key.toMethod,
-      acc.key.toPath,
-      avgDelayMs,
-    );
+
+    const pattern = jsonrpc
+      ? classifyJsonRpcPattern(acc.key.fromPath, acc.key.toPath)
+      : classifyPattern(
+          acc.key.fromMethod,
+          acc.key.fromPath,
+          acc.key.toMethod,
+          acc.key.toPath,
+          avgDelayMs,
+        );
 
     sequences.push({
       fromMethod: acc.key.fromMethod,
@@ -235,7 +313,9 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
   // Sort by count descending for readability
   sequences.sort((a, b) => b.count - a.count);
 
-  const verificationLoops = sequences.filter((s) => s.pattern === 'verification_loop');
+  const verificationLoops = sequences.filter(
+    (s) => s.pattern === 'verification_loop' || s.pattern === 'redundant_list' || s.pattern === 'retry',
+  );
   const wastedRequests = verificationLoops.reduce((sum, s) => sum + s.count, 0);
 
   return {

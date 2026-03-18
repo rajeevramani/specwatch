@@ -193,8 +193,15 @@ export function formatAgentReport(
   const lines: string[] = [];
   const endpointCount = completenessReport.endpoints.length;
 
+  // Detect JSON-RPC mode from analysis data
+  const isJsonRpc =
+    sequenceAnalysis.sequences.some(
+      (s) => s.fromPath.includes('tools/') || s.toPath.includes('tools/'),
+    ) || completenessReport.endpoints.some((e) => e.method === 'tools/call');
+  const entityLabel = isJsonRpc ? 'tools' : 'endpoints';
+
   lines.push(
-    `Agent-Friendliness Report: ${sessionName} (${totalSamples} samples, ${endpointCount} endpoints)`,
+    `Agent-Friendliness Report: ${sessionName} (${totalSamples} samples, ${endpointCount} ${entityLabel})`,
   );
 
   // Verification loops section
@@ -205,11 +212,23 @@ export function formatAgentReport(
     lines.push('  No verification loops detected.');
   } else {
     for (const loop of loops) {
-      lines.push(`  ${loop.fromMethod} ${loop.fromPath} → ${loop.toMethod} ${loop.toPath}`);
-      lines.push(`    ${loop.count} occurrences, avg ${loop.avgDelayMs}ms delay`);
-      lines.push(
-        `    → Enrich ${loop.fromMethod} response to eliminate redundant ${loop.toMethod}`,
-      );
+      if (isJsonRpc) {
+        lines.push(`  ${loop.fromPath} → ${loop.toPath}`);
+        lines.push(`    ${loop.count} occurrences, avg ${loop.avgDelayMs}ms delay`);
+        if (loop.pattern === 'retry') {
+          lines.push(`    → Tool is being retried — check error handling`);
+        } else if (loop.pattern === 'redundant_list') {
+          lines.push(`    → Cache tool list to avoid redundant calls`);
+        } else {
+          lines.push(`    → Enrich write tool response to eliminate redundant read`);
+        }
+      } else {
+        lines.push(`  ${loop.fromMethod} ${loop.fromPath} → ${loop.toMethod} ${loop.toPath}`);
+        lines.push(`    ${loop.count} occurrences, avg ${loop.avgDelayMs}ms delay`);
+        lines.push(
+          `    → Enrich ${loop.fromMethod} response to eliminate redundant ${loop.toMethod}`,
+        );
+      }
     }
   }
 
@@ -224,8 +243,9 @@ export function formatAgentReport(
   } else {
     for (const endpoint of thin) {
       const pct = Math.round(endpoint.completenessScore * 100);
+      const label = isJsonRpc ? endpoint.path : `${endpoint.method} ${endpoint.path}`;
       lines.push(
-        `  ${endpoint.method} ${endpoint.path} — ${pct}% complete (${endpoint.writeFieldCount} of ${endpoint.readFieldCount} fields)`,
+        `  ${label} — ${pct}% complete (${endpoint.writeFieldCount} of ${endpoint.readFieldCount} fields)`,
       );
       if (endpoint.missingFields.length > 0) {
         const MAX_FIELDS = 5;

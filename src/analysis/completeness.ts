@@ -190,28 +190,42 @@ export function analyzeCompleteness(
 // JSON-RPC tool name matching
 // ---------------------------------------------------------------------------
 
-const WRITE_PREFIXES = /^(create|set|update|put|patch|add|insert|upsert|delete|remove)[-_]/i;
-const READ_PREFIXES = /^(get|query|read|describe|list|fetch|show|find|lookup)[-_]/i;
+const WRITE_VERBS = /(?:^|[-_])(create|set|update|put|patch|add|insert|upsert|delete|remove)[-_]/i;
+const READ_VERBS = /(?:^|[-_])(get|query|read|describe|list|fetch|show|find|lookup)[-_]/i;
 
 /**
- * Check if a tool name is a write-like operation.
+ * Check if a tool name contains a write-like verb.
+ * Handles prefixed names like "cp_create_cluster".
  */
 export function isWriteTool(toolName: string): boolean {
-  return WRITE_PREFIXES.test(toolName);
+  return WRITE_VERBS.test(toolName);
 }
 
 /**
- * Check if a tool name is a read-like operation.
+ * Check if a tool name contains a read-like verb.
+ * Handles prefixed names like "cp_get_listener".
  */
 export function isReadTool(toolName: string): boolean {
-  return READ_PREFIXES.test(toolName);
+  return READ_VERBS.test(toolName);
 }
 
 /**
- * Extract the resource suffix from a tool name (e.g., "create_cluster" → "cluster").
+ * Extract the resource suffix from a tool name.
+ * Strips everything up to and including the verb.
+ * e.g., "cp_create_cluster" → "cluster", "get_listener" → "listener"
  */
 function getToolResourceSuffix(toolName: string): string {
-  return toolName.replace(WRITE_PREFIXES, '').replace(READ_PREFIXES, '');
+  const writeMatch = toolName.match(WRITE_VERBS);
+  if (writeMatch) {
+    const verbEnd = toolName.indexOf(writeMatch[1]) + writeMatch[1].length;
+    return toolName.slice(verbEnd).replace(/^[-_]/, '');
+  }
+  const readMatch = toolName.match(READ_VERBS);
+  if (readMatch) {
+    const verbEnd = toolName.indexOf(readMatch[1]) + readMatch[1].length;
+    return toolName.slice(verbEnd).replace(/^[-_]/, '');
+  }
+  return toolName;
 }
 
 /**

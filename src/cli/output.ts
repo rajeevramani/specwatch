@@ -8,6 +8,7 @@ import Table from 'cli-table3';
 import type { Session, AggregatedSchema, SchemaDiff } from '../types/index.js';
 import type { SequenceAnalysis, ToolUsage, RedundantCall } from '../analysis/sequences.js';
 import type { CompletenessReport } from '../analysis/completeness.js';
+import type { PhaseAnalysis } from '../analysis/phases.js';
 
 let verboseMode = false;
 let quietMode = false;
@@ -219,6 +220,7 @@ export function formatAgentReport(
   sequenceAnalysis: SequenceAnalysis,
   completenessReport: CompletenessReport,
   totalSamples: number,
+  phaseAnalysis?: PhaseAnalysis,
 ): string {
   const lines: string[] = [];
 
@@ -262,6 +264,49 @@ export function formatAgentReport(
       ]);
     }
     lines.push(usageTable.toString());
+  }
+
+  // --- PHASES table ---
+  if (phaseAnalysis && phaseAnalysis.phases.length > 0) {
+    lines.push('');
+    lines.push('PHASES');
+    const phaseTable = new Table({
+      head: ['Phase', 'Tools', 'Duration', 'Samples'],
+      style: { head: ['cyan'] },
+    });
+    for (const phase of phaseAnalysis.phases) {
+      const uniqueTools = [...new Set(phase.samples.map((s) => {
+        const label = s.toolName ?? s.operationKey;
+        return isJsonRpc ? label.replace(/^tools\/call:/, '') : label;
+      }))];
+      const toolsStr = uniqueTools.join(', ');
+      const durationStr = phase.duration < 1000
+        ? `${phase.duration}ms`
+        : `${(phase.duration / 1000).toFixed(1)}s`;
+      phaseTable.push([
+        phase.name,
+        toolsStr,
+        durationStr,
+        phase.samples.length.toString(),
+      ]);
+    }
+    lines.push(phaseTable.toString());
+
+    // Show multi-phase tools
+    const multiPhaseTools: [string, string[]][] = [];
+    for (const [tool, phases] of phaseAnalysis.toolPhaseMap) {
+      if (phases.length > 1) {
+        const label = isJsonRpc ? tool.replace(/^tools\/call:/, '') : tool;
+        multiPhaseTools.push([label, phases]);
+      }
+    }
+    if (multiPhaseTools.length > 0) {
+      lines.push('');
+      lines.push('  Multi-phase tools:');
+      for (const [tool, phases] of multiPhaseTools) {
+        lines.push(`    ${tool}: ${phases.join(' → ')}`);
+      }
+    }
   }
 
   // --- VERIFICATION LOOPS table ---

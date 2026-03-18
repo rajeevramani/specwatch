@@ -26,6 +26,7 @@ import { detectBreakingChanges } from '../aggregation/diff.js';
 import { buildOpenApiDocument, serializeOpenApi, convertToOpenApi30 } from '../export/openapi.js';
 import { buildJsonExport, serializeJson } from '../export/json.js';
 import { detectSequences } from '../analysis/sequences.js';
+import { detectPhases } from '../analysis/phases.js';
 import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/completeness.js';
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
 import { extractJsonRpcFromBody, isJsonRpcSession } from '../analysis/jsonrpc.js';
@@ -851,6 +852,9 @@ export function createProgram(): Command {
           ? analyzeJsonRpcCompleteness(samples)
           : analyzeCompleteness(schemas);
 
+        // Detect phases from sample timing
+        const phaseAnalysis = detectPhases(samples);
+
         // Format and output
         const sessionName = session.name ?? session.id.slice(0, 8);
         const output = formatAgentReport(
@@ -858,6 +862,7 @@ export function createProgram(): Command {
           sequenceAnalysis,
           completenessReport,
           session.sampleCount,
+          phaseAnalysis,
         );
         process.stdout.write(output + '\n');
       } catch (err) {

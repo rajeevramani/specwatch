@@ -12,6 +12,7 @@
 import yaml from 'js-yaml';
 import type { InferredSchema, AggregatedSchema, ExportOptions, HeaderEntry } from '../types/index.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
+import type { DomainModelRegistry } from './domain-models.js';
 
 // ============================================================
 // Schema Name Generation & $ref Extraction
@@ -70,6 +71,12 @@ interface SchemaCollector {
   register(name: string, schema: Record<string, unknown>): string;
   /** Get all collected schemas */
   getSchemas(): Record<string, Record<string, unknown>>;
+  /**
+   * Resolve a schema against domain models. If the schema (or its array items)
+   * matches a domain model, returns the appropriate $ref or array-of-$ref.
+   * Returns undefined if no domain model match.
+   */
+  resolveWithDomainModel(schema: InferredSchema): Record<string, unknown> | undefined;
 }
 
 /**
@@ -95,7 +102,7 @@ function schemasAreEqual(a: unknown, b: unknown): boolean {
   return aKeys.every((key) => key in bObj && schemasAreEqual(aObj[key], bObj[key]));
 }
 
-function createSchemaCollector(): SchemaCollector {
+function createSchemaCollector(domainModels?: DomainModelRegistry): SchemaCollector {
   const schemas: Record<string, Record<string, unknown>> = {};
   return {
     register(name: string, schema: Record<string, unknown>): string {
@@ -123,6 +130,30 @@ function createSchemaCollector(): SchemaCollector {
     },
     getSchemas(): Record<string, Record<string, unknown>> {
       return schemas;
+    },
+    resolveWithDomainModel(schema: InferredSchema): Record<string, unknown> | undefined {
+      if (domainModels === undefined) return undefined;
+
+      const match = domainModels.resolve(schema);
+      if (match === undefined) return undefined;
+
+      const modelName = match.model.name;
+
+      // Ensure the domain model schema is registered in components/schemas
+      if (!(modelName in schemas)) {
+        schemas[modelName] = match.model.openApiSchema;
+      }
+
+      if (match.isArrayItem) {
+        // Array-of match: return array wrapper with $ref to the item model
+        return {
+          type: 'array',
+          items: { $ref: `#/components/schemas/${modelName}` },
+        };
+      }
+
+      // Direct match: return $ref
+      return { $ref: `#/components/schemas/${modelName}` };
     },
   };
 }
@@ -449,15 +480,27 @@ export function buildOperationObject(
   if (schema.requestSchema !== undefined) {
     const requestBodySchema = convertSchemaToOpenApi(schema.requestSchema);
     if (collector !== undefined) {
-      const schemaName = generateSchemaName(schema.httpMethod, schema.path, 'request');
-      const ref = collector.register(schemaName, requestBodySchema);
-      operation['requestBody'] = {
-        content: {
-          'application/json': {
-            schema: { $ref: ref },
+      // Try domain model resolution first
+      const domainResolved = collector.resolveWithDomainModel(schema.requestSchema);
+      if (domainResolved !== undefined) {
+        operation['requestBody'] = {
+          content: {
+            'application/json': {
+              schema: domainResolved,
+            },
           },
-        },
-      };
+        };
+      } else {
+        const schemaName = generateSchemaName(schema.httpMethod, schema.path, 'request');
+        const ref = collector.register(schemaName, requestBodySchema);
+        operation['requestBody'] = {
+          content: {
+            'application/json': {
+              schema: { $ref: ref },
+            },
+          },
+        };
+      }
     } else {
       operation['requestBody'] = {
         content: {
@@ -533,6 +576,19 @@ function buildResponseObject(
   const openApiSchema = convertSchemaToOpenApi(responseSchema);
 
   if (collector !== undefined && httpMethod !== undefined && path !== undefined) {
+    // Try domain model resolution first
+    const domainResolved = collector.resolveWithDomainModel(responseSchema);
+    if (domainResolved !== undefined) {
+      return {
+        description,
+        content: {
+          'application/json': {
+            schema: domainResolved,
+          },
+        },
+      };
+    }
+
     const schemaName = generateSchemaName(httpMethod, path, 'response', statusCodeStr);
     const ref = collector.register(schemaName, openApiSchema);
     return {
@@ -706,12 +762,14 @@ export function detectSecuritySchemes(
  *
  * @param schemas - Aggregated schemas to include
  * @param options - Export options
+ * @param domainModels - Optional registry of discovered domain models for shared $ref names
  * @returns OpenAPI document as a plain object
  */
 export function buildOpenApiDocument(
   schemas: AggregatedSchema[],
   options: Partial<ExportOptions> = {},
   agentExtensions?: Record<string, AgentExtension>,
+  domainModels?: DomainModelRegistry,
 ): Record<string, unknown> {
   const title = options.title ?? 'API';
   const version = options.version ?? '1.0.0';
@@ -727,7 +785,16 @@ export function buildOpenApiDocument(
   const globalHeaderNames = new Set(globalHeaderEntries.map((h) => h.name.toLowerCase()));
 
   // Create a collector for $ref extraction (always enabled)
-  const collector = createSchemaCollector();
+  // Pass domain models registry so the collector can resolve shared schemas
+  const collector = createSchemaCollector(domainModels);
+
+  // Pre-register domain models into components/schemas for consistent naming
+  if (domainModels !== undefined) {
+    for (const model of domainModels.models) {
+      collector.register(model.name, model.openApiSchema);
+    }
+  }
+
   const paths = buildPathsObject(schemas, options, globalHeaderNames, collector, agentExtensions);
 
   const doc: Record<string, unknown> = {

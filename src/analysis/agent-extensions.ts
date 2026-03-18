@@ -38,11 +38,9 @@ export function buildAgentExtensions(
 
   // --- Completeness data (keyed by write endpoint) ---
   for (const endpoint of completenessReport.endpoints) {
-    // JSON-RPC: path is tool name (e.g. "cp_create_cluster"), key as "tools/call:tool_name"
+    // JSON-RPC: path is already operation key (e.g. "tools/call:cp_create_cluster")
     // REST: key as "METHOD /path"
-    const key = isJsonRpc
-      ? `tools/call:${endpoint.path}`
-      : `${endpoint.method} ${endpoint.path}`;
+    const key = isJsonRpc ? endpoint.path : `${endpoint.method} ${endpoint.path}`;
     const ext: AgentExtension = {};
 
     ext.responseCompleteness = Math.round(endpoint.completenessScore * 100) / 100;

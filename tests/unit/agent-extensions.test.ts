@@ -226,7 +226,7 @@ describe('buildAgentExtensions', () => {
     expect(ext.commonNextSteps).toEqual(['GET /orders/{orderId}']);
   });
 
-  it('keys by tool name for JSON-RPC sessions', () => {
+  it('keys by operation key for JSON-RPC sessions (isJsonRpc=true)', () => {
     const seqAnalysis: SequenceAnalysis = {
       sequences: [
         {
@@ -269,13 +269,66 @@ describe('buildAgentExtensions', () => {
       avgCompleteness: 0.2,
     };
 
-    const result = buildAgentExtensions(seqAnalysis, report);
-    const key = 'tools/call tools/call:create_cluster';
+    const result = buildAgentExtensions(seqAnalysis, report, true);
+    const key = 'tools/call:create_cluster';
     expect(result[key]).toBeDefined();
     expect(result[key].responseCompleteness).toBe(0.2);
     expect(result[key].verificationLoopDetected).toBe(true);
     expect(result[key].verificationLoopCount).toBe(8);
-    expect(result[key].commonNextSteps).toEqual(['tools/call tools/call:get_cluster']);
+    expect(result[key].commonNextSteps).toEqual(['tools/call:get_cluster']);
+  });
+
+  it('REST sessions unchanged when isJsonRpc=false (default)', () => {
+    const seqAnalysis: SequenceAnalysis = {
+      sequences: [
+        {
+          fromMethod: 'POST',
+          fromPath: '/users',
+          toMethod: 'GET',
+          toPath: '/users/{userId}',
+          avgDelayMs: 100,
+          count: 3,
+          pattern: 'verification_loop',
+        },
+      ],
+      verificationLoops: [
+        {
+          fromMethod: 'POST',
+          fromPath: '/users',
+          toMethod: 'GET',
+          toPath: '/users/{userId}',
+          avgDelayMs: 100,
+          count: 3,
+          pattern: 'verification_loop',
+        },
+      ],
+      totalRequests: 10,
+      wastedRequests: 3,
+    };
+
+    const report: CompletenessReport = {
+      endpoints: [
+        {
+          method: 'POST',
+          path: '/users',
+          writeFieldCount: 2,
+          readFieldCount: 5,
+          completenessScore: 0.4,
+          missingFields: ['email', 'phone', 'address'],
+        },
+      ],
+      thinResponses: [],
+      avgCompleteness: 0.4,
+    };
+
+    // Default (no isJsonRpc) → REST keying
+    const result = buildAgentExtensions(seqAnalysis, report);
+    expect(result['POST /users']).toBeDefined();
+    expect(result['POST /users'].responseCompleteness).toBe(0.4);
+    expect(result['POST /users'].verificationLoopDetected).toBe(true);
+    expect(result['POST /users'].commonNextSteps).toEqual(['GET /users/{userId}']);
+    // Operation key should NOT appear
+    expect(result['tools/call:create_cluster']).toBeUndefined();
   });
 
   it('endpoints with no analysis data have no extension', () => {

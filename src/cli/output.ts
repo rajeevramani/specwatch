@@ -243,7 +243,10 @@ export function formatAgentReport(
   } else {
     for (const endpoint of thin) {
       const pct = Math.round(endpoint.completenessScore * 100);
-      const label = isJsonRpc ? endpoint.path : `${endpoint.method} ${endpoint.path}`;
+      // JSON-RPC: path is "tools/call:tool_name", display just the tool name
+      const label = isJsonRpc
+        ? endpoint.path.replace(/^tools\/call:/, '')
+        : `${endpoint.method} ${endpoint.path}`;
       lines.push(
         `  ${label} — ${pct}% complete (${endpoint.writeFieldCount} of ${endpoint.readFieldCount} fields)`,
       );

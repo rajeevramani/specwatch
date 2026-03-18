@@ -44,7 +44,7 @@ describe('formatAgentReport', () => {
 
     const output = formatAgentReport('my-api', analysis, completeness, 50);
 
-    expect(output).toContain('Agent-Friendliness Report: my-api (50 samples, 1 endpoints)');
+    expect(output).toContain('Agent-Friendliness Report: my-api (50 samples, 1 endpoint');
     expect(output).toContain('VERIFICATION LOOPS');
     expect(output).toContain('POST /users → GET /users/{userId}');
     expect(output).toContain('5 occurrences, avg 120ms delay');
@@ -271,8 +271,73 @@ describe('formatAgentReport', () => {
 
     const output = formatAgentReport('mcp-api', analysis, completeness, 15);
 
-    // JSON-RPC format: shows operation key, not "METHOD path"
-    expect(output).toContain('tools/call:create_cluster — 20% complete (2 of 10 fields)');
+    // JSON-RPC thin responses: shows just tool name, not full operation key
+    expect(output).toContain('create_cluster — 20% complete (2 of 10 fields)');
     expect(output).toContain('Missing: status, region, ports');
+    // Should NOT show "tools/call create_cluster" or "tools/call:create_cluster —"
+    expect(output).not.toContain('tools/call:create_cluster —');
+  });
+
+  it('uses "tools" label instead of "endpoints" for JSON-RPC', () => {
+    const analysis: SequenceAnalysis = {
+      sequences: [
+        {
+          fromMethod: 'tools/call',
+          fromPath: 'tools/call:create_item',
+          toMethod: 'tools/call',
+          toPath: 'tools/call:get_item',
+          avgDelayMs: 100,
+          count: 1,
+          pattern: 'verification_loop',
+        },
+      ],
+      verificationLoops: [],
+      totalRequests: 5,
+      wastedRequests: 0,
+    };
+    const completeness: CompletenessReport = {
+      endpoints: [
+        {
+          method: 'tools/call',
+          path: 'tools/call:create_item',
+          writeFieldCount: 3,
+          readFieldCount: 6,
+          completenessScore: 0.5,
+          missingFields: ['a', 'b', 'c'],
+        },
+      ],
+      thinResponses: [],
+      avgCompleteness: 0.5,
+    };
+
+    const output = formatAgentReport('mcp-api', analysis, completeness, 20);
+    expect(output).toContain('1 tools)');
+    expect(output).not.toContain('1 endpoints)');
+  });
+
+  it('formats JSON-RPC redundant_list pattern', () => {
+    const loop: OperationSequence = {
+      fromMethod: 'tools/call',
+      fromPath: 'tools/list',
+      toMethod: 'tools/call',
+      toPath: 'tools/list',
+      avgDelayMs: 50,
+      count: 4,
+      pattern: 'redundant_list',
+    };
+    const analysis: SequenceAnalysis = {
+      sequences: [loop],
+      verificationLoops: [loop],
+      totalRequests: 10,
+      wastedRequests: 4,
+    };
+    const completeness: CompletenessReport = {
+      endpoints: [],
+      thinResponses: [],
+      avgCompleteness: 0,
+    };
+
+    const output = formatAgentReport('mcp-api', analysis, completeness, 10);
+    expect(output).toContain('→ Cache tool list to avoid redundant calls');
   });
 });

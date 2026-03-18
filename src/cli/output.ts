@@ -273,6 +273,8 @@ export function formatAgentReport(
     const phaseTable = new Table({
       head: ['Phase', 'Tools', 'Duration', 'Samples'],
       style: { head: ['cyan'] },
+      colWidths: [null, 50, null, null],
+      wordWrap: true,
     });
     for (const phase of phaseAnalysis.phases) {
       const uniqueTools = [...new Set(phase.samples.map((s) => {
@@ -302,10 +304,15 @@ export function formatAgentReport(
     }
     if (multiPhaseTools.length > 0) {
       lines.push('');
-      lines.push('  Multi-phase tools:');
+      lines.push('MULTI-PHASE TOOLS');
+      const multiTable = new Table({
+        head: ['Tool', 'Phases'],
+        style: { head: ['cyan'] },
+      });
       for (const [tool, phases] of multiPhaseTools) {
-        lines.push(`    ${tool}: ${phases.join(' → ')}`);
+        multiTable.push([tool, phases.join(' → ')]);
       }
+      lines.push(multiTable.toString());
     }
   }
 
@@ -364,9 +371,12 @@ export function formatAgentReport(
     // For JSON-RPC sessions with no matched write/read pairs, show MCP-specific message
     const hasFieldData = completenessReport.endpoints.length > 0;
     if (isJsonRpc && !hasFieldData) {
-      lines.push(
-        '  (MCP responses use text content — field-level scoring not available)',
-      );
+      const noteTable = new Table({
+        head: ['Note'],
+        style: { head: ['cyan'] },
+      });
+      noteTable.push(['MCP responses use text content — field-level scoring not available']);
+      lines.push(noteTable.toString());
     } else {
       lines.push('  All write responses return adequate data.');
     }

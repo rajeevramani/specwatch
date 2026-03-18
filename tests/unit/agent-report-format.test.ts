@@ -455,7 +455,7 @@ describe('formatAgentReport', () => {
     const output = formatAgentReport('mcp-api', analysis, completeness, 3);
 
     expect(output).toContain(
-      '(MCP responses use text content — field-level scoring not available)',
+      'MCP responses use text content',
     );
     expect(output).not.toContain('All write responses return adequate data.');
   });

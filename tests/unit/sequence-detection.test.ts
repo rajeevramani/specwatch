@@ -541,12 +541,16 @@ describe('detectSequences with JSON-RPC', () => {
 
     const result = detectSequences(db, session.id);
     expect(result.totalRequests).toBe(3);
-    expect(result.sequences).toHaveLength(2);
 
-    // Should use operation keys, not HTTP method/path
-    const seq0 = result.sequences.find((s) => s.fromPath === 'initialize');
-    expect(seq0).toBeDefined();
-    expect(seq0!.toPath).toBe('tools/list');
+    // Windowed detection only emits non-unknown patterns, so no sequences
+    // for initialize→tools/list or tools/list→tools/call (all unknown)
+    expect(result.sequences).toHaveLength(0);
+
+    // But tool usage should reflect all 3 distinct operations
+    expect(result.toolUsage).toHaveLength(3);
+    expect(result.toolUsage.map((t) => t.operationKey)).toContain('initialize');
+    expect(result.toolUsage.map((t) => t.operationKey)).toContain('tools/list');
+    expect(result.toolUsage.map((t) => t.operationKey)).toContain('tools/call:create_cluster');
   });
 
   it('detects repeated tools/list as redundant_list', () => {
@@ -573,7 +577,15 @@ describe('detectSequences with JSON-RPC', () => {
     const result = detectSequences(db, session.id);
     const redundant = result.sequences.find((s) => s.pattern === 'redundant_list');
     expect(redundant).toBeDefined();
-    expect(redundant!.count).toBe(4); // 4 consecutive pairs from 5 samples
+    // Windowed detection finds pairs within window of 5: each of 5 samples
+    // pairs with all subsequent within window → more matches than consecutive only
+    expect(redundant!.count).toBeGreaterThanOrEqual(4);
+
+    // Also check redundantCalls: tools/list called 5× but expected 1×
+    expect(result.redundantCalls).toHaveLength(1);
+    expect(result.redundantCalls[0].operationKey).toBe('tools/list');
+    expect(result.redundantCalls[0].count).toBe(5);
+    expect(result.redundantCalls[0].expectedCount).toBe(1);
   });
 
   it('detects same tool called consecutively as retry', () => {
@@ -601,7 +613,8 @@ describe('detectSequences with JSON-RPC', () => {
     const result = detectSequences(db, session.id);
     const retry = result.sequences.find((s) => s.pattern === 'retry');
     expect(retry).toBeDefined();
-    expect(retry!.count).toBe(2);
+    // Windowed: sample[0]→[1], [0]→[2], [1]→[2] = 3 pairs
+    expect(retry!.count).toBe(3);
   });
 
   it('detects create→get as verification_loop for JSON-RPC', () => {
@@ -638,6 +651,154 @@ describe('detectSequences with JSON-RPC', () => {
     expect(vloop).toBeDefined();
     expect(vloop!.fromPath).toBe('tools/call:create_cluster');
     expect(vloop!.toPath).toBe('tools/call:get_cluster');
+  });
+
+  it('windowed detection catches non-consecutive patterns', () => {
+    const session = sessionRepo.createSession(
+      'https://mcp.example.com',
+      8080,
+      undefined,
+      undefined,
+      'agent',
+    );
+    const base = Date.now();
+
+    // create_cluster at position 0
+    sampleRepo.insertSample({
+      sessionId: session.id,
+      httpMethod: 'POST',
+      path: '/api/v1/mcp',
+      normalizedPath: '/api/v1/mcp',
+      capturedAt: isoTime(base, 0),
+      jsonrpcMethod: 'tools/call',
+      jsonrpcTool: 'create_cluster',
+    });
+    // unrelated call at position 1
+    sampleRepo.insertSample({
+      sessionId: session.id,
+      httpMethod: 'POST',
+      path: '/api/v1/mcp',
+      normalizedPath: '/api/v1/mcp',
+      capturedAt: isoTime(base, 500),
+      jsonrpcMethod: 'tools/call',
+      jsonrpcTool: 'list_users',
+    });
+    // get_cluster at position 2 — should still be detected as verification_loop
+    sampleRepo.insertSample({
+      sessionId: session.id,
+      httpMethod: 'POST',
+      path: '/api/v1/mcp',
+      normalizedPath: '/api/v1/mcp',
+      capturedAt: isoTime(base, 1000),
+      jsonrpcMethod: 'tools/call',
+      jsonrpcTool: 'get_cluster',
+    });
+
+    const result = detectSequences(db, session.id);
+    const vloop = result.sequences.find((s) => s.pattern === 'verification_loop');
+    expect(vloop).toBeDefined();
+    expect(vloop!.fromPath).toBe('tools/call:create_cluster');
+    expect(vloop!.toPath).toBe('tools/call:get_cluster');
+  });
+
+  it('counts redundant calls for once-per-session operations', () => {
+    const session = sessionRepo.createSession(
+      'https://mcp.example.com',
+      8080,
+      undefined,
+      undefined,
+      'agent',
+    );
+    const base = Date.now();
+
+    // initialize called 4 times, tools/list called 3 times
+    for (let i = 0; i < 4; i++) {
+      sampleRepo.insertSample({
+        sessionId: session.id,
+        httpMethod: 'POST',
+        path: '/api/v1/mcp',
+        normalizedPath: '/api/v1/mcp',
+        capturedAt: isoTime(base, i * 100),
+        jsonrpcMethod: 'initialize',
+      });
+    }
+    for (let i = 0; i < 3; i++) {
+      sampleRepo.insertSample({
+        sessionId: session.id,
+        httpMethod: 'POST',
+        path: '/api/v1/mcp',
+        normalizedPath: '/api/v1/mcp',
+        capturedAt: isoTime(base, 500 + i * 100),
+        jsonrpcMethod: 'tools/list',
+      });
+    }
+
+    const result = detectSequences(db, session.id);
+
+    expect(result.redundantCalls).toHaveLength(2);
+    const initRedundant = result.redundantCalls.find((r) => r.operationKey === 'initialize');
+    expect(initRedundant).toBeDefined();
+    expect(initRedundant!.count).toBe(4);
+    expect(initRedundant!.expectedCount).toBe(1);
+
+    const listRedundant = result.redundantCalls.find((r) => r.operationKey === 'tools/list');
+    expect(listRedundant).toBeDefined();
+    expect(listRedundant!.count).toBe(3);
+    expect(listRedundant!.expectedCount).toBe(1);
+
+    // Wasted includes redundant calls: 3 + 2 = 5 redundant, plus any sequence waste
+    expect(result.wastedRequests).toBeGreaterThanOrEqual(5);
+  });
+
+  it('populates toolUsage with per-operation counts', () => {
+    const session = sessionRepo.createSession(
+      'https://mcp.example.com',
+      8080,
+      undefined,
+      undefined,
+      'agent',
+    );
+    const base = Date.now();
+
+    sampleRepo.insertSample({
+      sessionId: session.id,
+      httpMethod: 'POST',
+      path: '/api/v1/mcp',
+      normalizedPath: '/api/v1/mcp',
+      capturedAt: isoTime(base, 0),
+      jsonrpcMethod: 'initialize',
+    });
+    sampleRepo.insertSample({
+      sessionId: session.id,
+      httpMethod: 'POST',
+      path: '/api/v1/mcp',
+      normalizedPath: '/api/v1/mcp',
+      capturedAt: isoTime(base, 500),
+      jsonrpcMethod: 'tools/list',
+    });
+    for (let i = 0; i < 3; i++) {
+      sampleRepo.insertSample({
+        sessionId: session.id,
+        httpMethod: 'POST',
+        path: '/api/v1/mcp',
+        normalizedPath: '/api/v1/mcp',
+        capturedAt: isoTime(base, 1000 + i * 500),
+        jsonrpcMethod: 'tools/call',
+        jsonrpcTool: 'create_cluster',
+      });
+    }
+
+    const result = detectSequences(db, session.id);
+
+    expect(result.toolUsage).toHaveLength(3);
+    // Sorted by count desc
+    expect(result.toolUsage[0].operationKey).toBe('tools/call:create_cluster');
+    expect(result.toolUsage[0].count).toBe(3);
+    expect(result.toolUsage[0].isRedundant).toBe(false);
+
+    const initUsage = result.toolUsage.find((t) => t.operationKey === 'initialize');
+    expect(initUsage!.count).toBe(1);
+    expect(initUsage!.isRedundant).toBe(false); // Only 1 call, not redundant
   });
 
   it('REST session still uses HTTP-based pairing (no regression)', () => {

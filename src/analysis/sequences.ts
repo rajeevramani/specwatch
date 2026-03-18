@@ -40,6 +40,26 @@ export interface OperationSequence {
   pattern: SequencePattern;
 }
 
+/** A tool/operation that was called more times than expected. */
+export interface RedundantCall {
+  /** Operation key (e.g., "tools/list", "initialize") */
+  operationKey: string;
+  /** Actual number of calls observed */
+  count: number;
+  /** Expected number of calls (e.g., 1 for initialize, 1 for tools/list) */
+  expectedCount: number;
+}
+
+/** Tool usage entry — counts how many times each tool/operation was called. */
+export interface ToolUsage {
+  /** Operation key (e.g., "tools/call:create_cluster", "tools/list", "GET /users") */
+  operationKey: string;
+  /** Number of times called */
+  count: number;
+  /** Whether this is flagged as redundant */
+  isRedundant: boolean;
+}
+
 /** Summary analysis for a session's request sequences. */
 export interface SequenceAnalysis {
   /** All detected sequences */
@@ -50,6 +70,10 @@ export interface SequenceAnalysis {
   totalRequests: number;
   /** Estimated wasted requests (requests that are part of verification loops) */
   wastedRequests: number;
+  /** Tools/operations called more times than expected */
+  redundantCalls: RedundantCall[];
+  /** Per-tool/operation usage counts */
+  toolUsage: ToolUsage[];
 }
 
 // ---------------------------------------------------------------------------
@@ -228,58 +252,120 @@ function getOperationKey(sample: Sample, jsonrpc: boolean): { method: string; pa
  *
  * Only analyzes sessions where consumer = 'agent'.
  */
+/** Default window size for windowed sequence detection. */
+const WINDOW_SIZE = 5;
+
+/** Operations expected to be called only once per session. */
+const ONCE_PER_SESSION = new Set(['initialize', 'tools/list', 'notifications/initialized']);
+
 export function detectSequences(db: Database.Database, sessionId: string): SequenceAnalysis {
+  const empty: SequenceAnalysis = {
+    sequences: [],
+    verificationLoops: [],
+    totalRequests: 0,
+    wastedRequests: 0,
+    redundantCalls: [],
+    toolUsage: [],
+  };
+
   const sessionRepo = new SessionRepository(db);
   const sampleRepo = new SampleRepository(db);
 
   const session = sessionRepo.getSession(sessionId);
-  if (!session) {
-    return { sequences: [], verificationLoops: [], totalRequests: 0, wastedRequests: 0 };
-  }
+  if (!session) return empty;
 
   // Only analyze agent sessions
-  if (session.consumer !== 'agent') {
-    return { sequences: [], verificationLoops: [], totalRequests: 0, wastedRequests: 0 };
-  }
+  if (session.consumer !== 'agent') return empty;
 
   const samples = sampleRepo.listBySession(sessionId);
   if (samples.length < 2) {
-    return {
-      sequences: [],
-      verificationLoops: [],
-      totalRequests: samples.length,
-      wastedRequests: 0,
-    };
+    return { ...empty, totalRequests: samples.length };
   }
 
   const jsonrpc = isJsonRpcSession(samples);
 
-  // Group consecutive pairs
+  // --- Tool usage counts ---
+  const usageCounts = new Map<string, number>();
+  const ops = samples.map((s) => getOperationKey(s, jsonrpc));
+  for (const op of ops) {
+    const key = jsonrpc ? op.path : `${op.method} ${op.path}`;
+    usageCounts.set(key, (usageCounts.get(key) ?? 0) + 1);
+  }
+
+  // --- Redundant call detection (JSON-RPC only) ---
+  const redundantCalls: RedundantCall[] = [];
+  if (jsonrpc) {
+    for (const [opKey, count] of usageCounts) {
+      if (ONCE_PER_SESSION.has(opKey) && count > 1) {
+        redundantCalls.push({ operationKey: opKey, count, expectedCount: 1 });
+      }
+    }
+    redundantCalls.sort((a, b) => (b.count - b.expectedCount) - (a.count - a.expectedCount));
+  }
+
+  // --- Build tool usage list ---
+  const redundantKeys = new Set(redundantCalls.map((r) => r.operationKey));
+  const toolUsage: ToolUsage[] = [];
+  for (const [opKey, count] of usageCounts) {
+    toolUsage.push({ operationKey: opKey, count, isRedundant: redundantKeys.has(opKey) });
+  }
+  toolUsage.sort((a, b) => b.count - a.count);
+
+  // --- Sequence detection ---
   const accumulators = new Map<string, SequenceAccumulator>();
 
-  for (let i = 0; i < samples.length - 1; i++) {
-    const from = samples[i];
-    const to = samples[i + 1];
+  if (jsonrpc) {
+    // Windowed detection for JSON-RPC: look for patterns within a window of N requests
+    for (let i = 0; i < ops.length; i++) {
+      const fromOp = ops[i];
+      const fromTime = new Date(samples[i].capturedAt).getTime();
+      const limit = Math.min(i + WINDOW_SIZE, ops.length);
+      for (let j = i + 1; j < limit; j++) {
+        const toOp = ops[j];
+        const pattern = classifyJsonRpcPattern(fromOp.path, toOp.path);
+        if (pattern === 'unknown') continue;
 
-    const fromOp = getOperationKey(from, jsonrpc);
-    const toOp = getOperationKey(to, jsonrpc);
+        const key: SequenceKey = {
+          fromMethod: fromOp.method,
+          fromPath: fromOp.path,
+          toMethod: toOp.method,
+          toPath: toOp.path,
+        };
+        const keyStr = sequenceKeyString(key);
+        const delayMs = new Date(samples[j].capturedAt).getTime() - fromTime;
 
-    const key: SequenceKey = {
-      fromMethod: fromOp.method,
-      fromPath: fromOp.path,
-      toMethod: toOp.method,
-      toPath: toOp.path,
-    };
+        const existing = accumulators.get(keyStr);
+        if (existing) {
+          existing.delays.push(delayMs);
+        } else {
+          accumulators.set(keyStr, { key, delays: [delayMs] });
+        }
+      }
+    }
+  } else {
+    // Consecutive pairing for REST sessions (existing behavior)
+    for (let i = 0; i < samples.length - 1; i++) {
+      const fromOp = ops[i];
+      const toOp = ops[i + 1];
 
-    const keyStr = sequenceKeyString(key);
-    const delayMs =
-      new Date(to.capturedAt).getTime() - new Date(from.capturedAt).getTime();
+      const key: SequenceKey = {
+        fromMethod: fromOp.method,
+        fromPath: fromOp.path,
+        toMethod: toOp.method,
+        toPath: toOp.path,
+      };
 
-    const existing = accumulators.get(keyStr);
-    if (existing) {
-      existing.delays.push(delayMs);
-    } else {
-      accumulators.set(keyStr, { key, delays: [delayMs] });
+      const keyStr = sequenceKeyString(key);
+      const delayMs =
+        new Date(samples[i + 1].capturedAt).getTime() -
+        new Date(samples[i].capturedAt).getTime();
+
+      const existing = accumulators.get(keyStr);
+      if (existing) {
+        existing.delays.push(delayMs);
+      } else {
+        accumulators.set(keyStr, { key, delays: [delayMs] });
+      }
     }
   }
 
@@ -318,10 +404,18 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
   );
   const wastedRequests = verificationLoops.reduce((sum, s) => sum + s.count, 0);
 
+  // Add redundant call counts to wasted requests
+  const redundantWasted = redundantCalls.reduce(
+    (sum, r) => sum + (r.count - r.expectedCount),
+    0,
+  );
+
   return {
     sequences,
     verificationLoops,
     totalRequests: samples.length,
-    wastedRequests,
+    wastedRequests: wastedRequests + redundantWasted,
+    redundantCalls,
+    toolUsage,
   };
 }

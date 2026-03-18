@@ -6,7 +6,7 @@
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { Session, AggregatedSchema, SchemaDiff } from '../types/index.js';
-import type { SequenceAnalysis } from '../analysis/sequences.js';
+import type { SequenceAnalysis, ToolUsage, RedundantCall } from '../analysis/sequences.js';
 import type { CompletenessReport } from '../analysis/completeness.js';
 
 let verboseMode = false;
@@ -184,6 +184,36 @@ export function formatDiff(diff: SchemaDiff, endpoint?: string): string {
   return lines.join('\n');
 }
 
+/**
+ * Get the recommendation string for a verification loop pattern.
+ */
+function loopRecommendation(
+  loop: { pattern: string; fromMethod: string; toMethod: string },
+  isJsonRpc: boolean,
+): string {
+  if (isJsonRpc) {
+    if (loop.pattern === 'retry') return 'Check error handling';
+    if (loop.pattern === 'redundant_list') return 'Cache tool list';
+    return 'Enrich write response';
+  }
+  return `Enrich ${loop.fromMethod} response to eliminate ${loop.toMethod}`;
+}
+
+/**
+ * Format the pattern label for a verification loop.
+ */
+function loopPatternLabel(
+  loop: { fromMethod: string; fromPath: string; toMethod: string; toPath: string },
+  isJsonRpc: boolean,
+): string {
+  if (isJsonRpc) {
+    const from = loop.fromPath.replace(/^tools\/call:/, '');
+    const to = loop.toPath.replace(/^tools\/call:/, '');
+    return `${from} → ${to}`;
+  }
+  return `${loop.fromMethod} ${loop.fromPath} → ${loop.toMethod} ${loop.toPath}`;
+}
+
 export function formatAgentReport(
   sessionName: string,
   sequenceAnalysis: SequenceAnalysis,
@@ -191,55 +221,110 @@ export function formatAgentReport(
   totalSamples: number,
 ): string {
   const lines: string[] = [];
-  const endpointCount = completenessReport.endpoints.length;
 
   // Detect JSON-RPC mode from analysis data
   const isJsonRpc =
     sequenceAnalysis.sequences.some(
       (s) => s.fromPath.includes('tools/') || s.toPath.includes('tools/'),
-    ) || completenessReport.endpoints.some((e) => e.method === 'tools/call');
+    ) ||
+    completenessReport.endpoints.some((e) => e.method === 'tools/call') ||
+    sequenceAnalysis.toolUsage.some(
+      (t) => t.operationKey.startsWith('tools/') || t.operationKey === 'initialize',
+    );
   const entityLabel = isJsonRpc ? 'tools' : 'endpoints';
 
+  // Header — count distinct tools/endpoints from toolUsage (sample-derived), not completeness report
+  const distinctCount =
+    sequenceAnalysis.toolUsage.length > 0
+      ? sequenceAnalysis.toolUsage.length
+      : completenessReport.endpoints.length;
+
   lines.push(
-    `Agent-Friendliness Report: ${sessionName} (${totalSamples} samples, ${endpointCount} ${entityLabel})`,
+    `Agent-Friendliness Report: ${sessionName} (${totalSamples} samples, ${distinctCount} ${entityLabel})`,
   );
 
-  // Verification loops section
+  // --- TOOL USAGE table ---
+  if (sequenceAnalysis.toolUsage.length > 0) {
+    lines.push('');
+    lines.push('TOOL USAGE');
+    const usageTable = new Table({
+      head: ['Tool', 'Calls', 'Status'],
+      style: { head: ['cyan'] },
+    });
+    for (const tool of sequenceAnalysis.toolUsage) {
+      const label = isJsonRpc
+        ? tool.operationKey.replace(/^tools\/call:/, '')
+        : tool.operationKey;
+      usageTable.push([
+        label,
+        tool.count.toString(),
+        tool.isRedundant ? 'redundant' : '',
+      ]);
+    }
+    lines.push(usageTable.toString());
+  }
+
+  // --- VERIFICATION LOOPS table ---
   lines.push('');
   lines.push('VERIFICATION LOOPS');
   const loops = [...sequenceAnalysis.verificationLoops].sort((a, b) => b.count - a.count);
   if (loops.length === 0) {
     lines.push('  No verification loops detected.');
   } else {
+    const loopTable = new Table({
+      head: ['Pattern', 'Occurrences', 'Avg Delay', 'Recommendation'],
+      style: { head: ['cyan'] },
+    });
     for (const loop of loops) {
-      if (isJsonRpc) {
-        lines.push(`  ${loop.fromPath} → ${loop.toPath}`);
-        lines.push(`    ${loop.count} occurrences, avg ${loop.avgDelayMs}ms delay`);
-        if (loop.pattern === 'retry') {
-          lines.push(`    → Tool is being retried — check error handling`);
-        } else if (loop.pattern === 'redundant_list') {
-          lines.push(`    → Cache tool list to avoid redundant calls`);
-        } else {
-          lines.push(`    → Enrich write tool response to eliminate redundant read`);
-        }
-      } else {
-        lines.push(`  ${loop.fromMethod} ${loop.fromPath} → ${loop.toMethod} ${loop.toPath}`);
-        lines.push(`    ${loop.count} occurrences, avg ${loop.avgDelayMs}ms delay`);
-        lines.push(
-          `    → Enrich ${loop.fromMethod} response to eliminate redundant ${loop.toMethod}`,
-        );
-      }
+      loopTable.push([
+        loopPatternLabel(loop, isJsonRpc),
+        loop.count.toString(),
+        `${loop.avgDelayMs}ms`,
+        loopRecommendation(loop, isJsonRpc),
+      ]);
     }
+    lines.push(loopTable.toString());
   }
 
-  // Thin responses section
+  // --- REDUNDANT CALLS table (JSON-RPC only) ---
+  if (sequenceAnalysis.redundantCalls.length > 0) {
+    lines.push('');
+    lines.push('REDUNDANT CALLS');
+    const redundantTable = new Table({
+      head: ['Tool', 'Actual', 'Expected', 'Wasted'],
+      style: { head: ['cyan'] },
+    });
+    for (const r of sequenceAnalysis.redundantCalls) {
+      const extra = r.count - r.expectedCount;
+      const label = isJsonRpc
+        ? r.operationKey.replace(/^tools\/call:/, '')
+        : r.operationKey;
+      redundantTable.push([
+        label,
+        r.count.toString(),
+        r.expectedCount.toString(),
+        extra.toString(),
+      ]);
+    }
+    lines.push(redundantTable.toString());
+  }
+
+  // --- THIN RESPONSES ---
   lines.push('');
   lines.push('THIN RESPONSES');
   const thin = [...completenessReport.thinResponses].sort(
     (a, b) => a.completenessScore - b.completenessScore,
   );
   if (thin.length === 0) {
-    lines.push('  All write responses return adequate data.');
+    // For JSON-RPC sessions with no matched write/read pairs, show MCP-specific message
+    const hasFieldData = completenessReport.endpoints.length > 0;
+    if (isJsonRpc && !hasFieldData) {
+      lines.push(
+        '  (MCP responses use text content — field-level scoring not available)',
+      );
+    } else {
+      lines.push('  All write responses return adequate data.');
+    }
   } else {
     for (const endpoint of thin) {
       const pct = Math.round(endpoint.completenessScore * 100);
@@ -261,7 +346,7 @@ export function formatAgentReport(
     }
   }
 
-  // Summary section
+  // --- SUMMARY ---
   lines.push('');
   lines.push('SUMMARY');
   const { totalRequests, wastedRequests } = sequenceAnalysis;

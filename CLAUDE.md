@@ -49,6 +49,10 @@ specwatch export [--format openapi|json] [--session <id>] [--snapshot <n>] [--mi
 specwatch snapshots [session-id]
 specwatch diff <session1> <session2> [--snapshots <n1> <n2>]
 
+## Git Style
+
+- Keep commit messages short — one-line summary, no verbose body unless truly needed
+
 ## Key Design Decisions
 
 - Raw request/response data is NEVER persisted — only inferred schemas are stored

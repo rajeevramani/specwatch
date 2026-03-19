@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import type { Session, AggregatedSchema, SchemaDiff } from '../types/index.js';
+import type { Session, AggregatedSchema, SchemaDiff, Sample } from '../types/index.js';
 import type { SequenceAnalysis } from '../analysis/sequences.js';
 import type { CompletenessReport } from '../analysis/completeness.js';
 import type { PhaseAnalysis } from '../analysis/phases.js';
@@ -223,6 +223,7 @@ export function formatAgentReport(
   totalSamples: number,
   phaseAnalysis?: PhaseAnalysis,
   investigationReport?: InvestigationReport,
+  samples?: Sample[],
 ): string {
   const lines: string[] = [];
 
@@ -296,25 +297,28 @@ export function formatAgentReport(
     }
     lines.push(phaseTable.toString());
 
-    // Show multi-phase tools
-    const multiPhaseTools: [string, string[]][] = [];
-    for (const [tool, phases] of phaseAnalysis.toolPhaseMap) {
-      if (phases.length > 1) {
-        const label = isJsonRpc ? tool.replace(/^tools\/call:/, '') : tool;
-        multiPhaseTools.push([label, phases]);
-      }
-    }
-    if (multiPhaseTools.length > 0) {
+    // Show full tool call sequence
+    const allPhaseSamples = phaseAnalysis.phases.flatMap((phase) =>
+      phase.samples.map((s) => ({ ...s, phase: phase.name })),
+    );
+    allPhaseSamples.sort((a, b) => a.index - b.index);
+
+    if (allPhaseSamples.length > 0) {
       lines.push('');
-      lines.push('MULTI-PHASE TOOLS');
-      const multiTable = new Table({
-        head: ['Tool', 'Phases'],
+      lines.push('CALL SEQUENCE');
+      const seqTable = new Table({
+        head: ['#', 'Tool', 'Phase', 'Status'],
         style: { head: ['cyan'] },
       });
-      for (const [tool, phases] of multiPhaseTools) {
-        multiTable.push([tool, phases.join(' → ')]);
+      for (let i = 0; i < allPhaseSamples.length; i++) {
+        const ps = allPhaseSamples[i];
+        const label = isJsonRpc
+          ? (ps.toolName ?? ps.operationKey).replace(/^tools\/call:/, '')
+          : ps.operationKey;
+        const status = samples?.[ps.index]?.statusCode?.toString() ?? '';
+        seqTable.push([(i + 1).toString(), label, ps.phase, status]);
       }
-      lines.push(multiTable.toString());
+      lines.push(seqTable.toString());
     }
   }
 

@@ -93,9 +93,11 @@ export function detectPhases(samples: Sample[]): PhaseAnalysis {
   // Classify each group
   const phases: SessionPhase[] = [];
   let prevPhaseName: PhaseName | undefined;
+  let hasSeenWrites = false;
 
   for (const group of groups) {
-    const name = classifyPhase(group, jsonrpc, prevPhaseName);
+    const name = classifyPhase(group, jsonrpc, prevPhaseName, hasSeenWrites);
+    if (name === 'creation') hasSeenWrites = true;
     const startTime = new Date(group[0].capturedAt).getTime();
     const endTime = new Date(group[group.length - 1].capturedAt).getTime();
     phases.push({
@@ -133,6 +135,7 @@ function classifyPhase(
   group: PhaseSample[],
   jsonrpc: boolean,
   prevPhase: PhaseName | undefined,
+  hasSeenWrites: boolean,
 ): PhaseName {
   let writeCount = 0;
   let readCount = 0;
@@ -161,12 +164,12 @@ function classifyPhase(
   // If any write tool is present, it's a creation phase
   if (writeCount > 0) return 'creation';
 
-  // If this follows a creation phase and has high diversity of read tools, it's verification
-  if (prevPhase === 'creation' && readCount > 0 && distinctOps.size >= 3) {
+  // If writes have occurred earlier in the session and this phase is read-heavy, it's verification
+  if (hasSeenWrites && readCount > 0) {
     return 'verification';
   }
 
-  // If mostly reads, it's discovery
+  // Read-heavy before any writes = discovery
   if (readCount > 0) return 'discovery';
 
   // Fallback

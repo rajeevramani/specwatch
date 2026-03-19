@@ -50,6 +50,8 @@ import {
   formatInvestigation,
 } from './output.js';
 import { SpecwatchError, noActiveSessionError, sessionNotFoundError, sessionNameNotFoundError, noCompletedSessionsError } from './errors.js';
+import { loadLlmConfig } from '../llm/config.js';
+import { explainAllInvestigations } from '../llm/client.js';
 import type { ExportOptions, AggregatedSchema, SessionConsumer } from '../types/index.js';
 
 /**
@@ -820,14 +822,15 @@ export function createProgram(): Command {
     .description('Analyze agent traffic patterns and API friendliness')
     .argument('[session-id]', 'Session ID (defaults to latest completed)')
     .option('--name <name>', 'Session name')
-    .action((sessionId: string | undefined, opts: Record<string, string | undefined>) => {
+    .option('--explain', 'Use LLM for richer explanations')
+    .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
       try {
         const db = getDatabase();
         const sessions = new SessionRepository(db);
         const schemaRepo = new AggregatedSchemaRepository(db);
 
         // Resolve session (same pattern as export command)
-        const targetId = resolveSessionId(sessions, sessionId, opts['name'], 'latest');
+        const targetId = resolveSessionId(sessions, sessionId, opts['name'] as string | undefined, 'latest');
         const session = sessions.getSession(targetId)!;
 
         // Validate consumer type
@@ -859,11 +862,21 @@ export function createProgram(): Command {
         const phaseAnalysis = detectPhases(samples);
 
         // Investigate redundant calls
-        const investigationReport = investigateRedundantCalls(
+        let investigationReport = investigateRedundantCalls(
           samples,
           sequenceAnalysis.redundantCalls,
           phaseAnalysis,
         );
+
+        // LLM-enhanced explanations
+        if (opts['explain']) {
+          const llmConfig = loadLlmConfig();
+          if (!llmConfig) {
+            warn('LLM not configured — set LLM_BASE_URL and LLM_API_KEY (or add a .env file). Continuing with heuristic explanations.');
+          } else {
+            investigationReport = await explainAllInvestigations(investigationReport, llmConfig);
+          }
+        }
 
         // Format and output
         const sessionName = session.name ?? session.id.slice(0, 8);
@@ -874,6 +887,7 @@ export function createProgram(): Command {
           session.sampleCount,
           phaseAnalysis,
           investigationReport,
+          samples,
         );
         process.stdout.write(output + '\n');
       } catch (err) {
@@ -888,13 +902,14 @@ export function createProgram(): Command {
     .argument('[session-id]', 'Session ID (defaults to latest completed)')
     .option('--tool <name>', 'Investigate a specific tool/operation')
     .option('--name <name>', 'Session name')
-    .action((sessionId: string | undefined, opts: Record<string, string | undefined>) => {
+    .option('--explain', 'Use LLM for richer explanations')
+    .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
       try {
         const db = getDatabase();
         const sessions = new SessionRepository(db);
 
         // Resolve session (same pattern as export command)
-        const targetId = resolveSessionId(sessions, sessionId, opts['name'], 'latest');
+        const targetId = resolveSessionId(sessions, sessionId, opts['name'] as string | undefined, 'latest');
         const session = sessions.getSession(targetId)!;
 
         // Validate consumer type
@@ -919,14 +934,30 @@ export function createProgram(): Command {
         const sequenceAnalysis = detectSequences(db, targetId);
         const phaseAnalysis = detectPhases(samples);
 
+        // Load LLM config if --explain
+        let llmConfig: ReturnType<typeof loadLlmConfig> = undefined;
+        if (opts['explain']) {
+          llmConfig = loadLlmConfig();
+          if (!llmConfig) {
+            warn('LLM not configured — set LLM_BASE_URL and LLM_API_KEY (or add a .env file). Continuing with heuristic explanations.');
+          }
+        }
+
         if (opts['tool']) {
           // Investigate a specific tool/operation
-          const investigation = investigateOperation(samples, opts['tool'], phaseAnalysis);
+          let investigation = investigateOperation(samples, opts['tool'] as string, phaseAnalysis);
           if (investigation.occurrences.length === 0) {
             throw new SpecwatchError(
               `No calls found for operation "${opts['tool']}"`,
               'Check the operation key with: specwatch agent-report',
             );
+          }
+          if (llmConfig) {
+            const enhanced = await explainAllInvestigations(
+              { sessionId: session.id, investigations: [investigation] },
+              llmConfig,
+            );
+            investigation = enhanced.investigations[0];
           }
           process.stdout.write(formatInvestigation(investigation) + '\n');
         } else {
@@ -936,11 +967,15 @@ export function createProgram(): Command {
             return;
           }
 
-          const report = investigateRedundantCalls(
+          let report = investigateRedundantCalls(
             samples,
             sequenceAnalysis.redundantCalls,
             phaseAnalysis,
           );
+
+          if (llmConfig) {
+            report = await explainAllInvestigations(report, llmConfig);
+          }
 
           for (const investigation of report.investigations) {
             process.stdout.write(formatInvestigation(investigation) + '\n\n');

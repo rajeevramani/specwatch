@@ -137,6 +137,21 @@ export class SampleRepository {
   }
 
   /**
+   * Returns all samples for a specific JSON-RPC method within a session.
+   */
+  listByJsonRpcMethod(sessionId: string, jsonrpcMethod: string): Sample[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM samples
+         WHERE session_id = ? AND jsonrpc_method = ?
+         ORDER BY captured_at ASC`,
+      )
+      .all(sessionId, jsonrpcMethod) as SampleRow[];
+
+    return rows.map(rowToSample);
+  }
+
+  /**
    * Groups all samples for a session by "METHOD /path STATUS_CODE".
    * Returns a Map keyed by that composite string.
    */

@@ -4,7 +4,7 @@
  * that force agents into verification loops.
  */
 import type { AggregatedSchema, InferredSchema, Sample } from '../types/index.js';
-import { isJsonRpcSession, extractJsonRpcOperation } from './jsonrpc.js';
+import { extractJsonRpcOperation } from './jsonrpc.js';
 
 // ---------------------------------------------------------------------------
 // Types

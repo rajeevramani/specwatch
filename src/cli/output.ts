@@ -6,9 +6,10 @@
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import type { Session, AggregatedSchema, SchemaDiff } from '../types/index.js';
-import type { SequenceAnalysis, ToolUsage, RedundantCall } from '../analysis/sequences.js';
+import type { SequenceAnalysis } from '../analysis/sequences.js';
 import type { CompletenessReport } from '../analysis/completeness.js';
 import type { PhaseAnalysis } from '../analysis/phases.js';
+import type { CallInvestigation, InvestigationReport } from '../analysis/investigation.js';
 
 let verboseMode = false;
 let quietMode = false;
@@ -221,6 +222,7 @@ export function formatAgentReport(
   completenessReport: CompletenessReport,
   totalSamples: number,
   phaseAnalysis?: PhaseAnalysis,
+  investigationReport?: InvestigationReport,
 ): string {
   const lines: string[] = [];
 
@@ -342,21 +344,35 @@ export function formatAgentReport(
   if (sequenceAnalysis.redundantCalls.length > 0) {
     lines.push('');
     lines.push('REDUNDANT CALLS');
+    const hasInvestigation = investigationReport && investigationReport.investigations.length > 0;
+    const redundantHead = hasInvestigation
+      ? ['Tool', 'Actual', 'Expected', 'Wasted', 'Why']
+      : ['Tool', 'Actual', 'Expected', 'Wasted'];
     const redundantTable = new Table({
-      head: ['Tool', 'Actual', 'Expected', 'Wasted'],
+      head: redundantHead,
       style: { head: ['cyan'] },
+      ...(hasInvestigation
+        ? { wordWrap: true, colWidths: [undefined, 8, 10, 8, 46] }
+        : {}),
     });
     for (const r of sequenceAnalysis.redundantCalls) {
       const extra = r.count - r.expectedCount;
       const label = isJsonRpc
         ? r.operationKey.replace(/^tools\/call:/, '')
         : r.operationKey;
-      redundantTable.push([
+      const row: string[] = [
         label,
         r.count.toString(),
         r.expectedCount.toString(),
         extra.toString(),
-      ]);
+      ];
+      if (hasInvestigation) {
+        const inv = investigationReport!.investigations.find(
+          (i) => i.operationKey === r.operationKey,
+        );
+        row.push(inv ? inv.explanation : '');
+      }
+      redundantTable.push(row);
     }
     lines.push(redundantTable.toString());
   }
@@ -408,6 +424,106 @@ export function formatAgentReport(
   const wastedPct = totalRequests > 0 ? Math.round((wastedRequests / totalRequests) * 100) : 0;
   lines.push(`  Wasted requests: ${wastedRequests} of ${totalRequests} (${wastedPct}%)`);
   lines.push(`  Avg response completeness: ${completenessReport.avgCompleteness.toFixed(2)}`);
+
+  return lines.join('\n');
+}
+
+/**
+ * Format a detailed investigation of a single redundant operation.
+ * Used by the `investigate` command for deep-dive analysis.
+ */
+export function formatInvestigation(investigation: CallInvestigation): string {
+  const lines: string[] = [];
+
+  lines.push(
+    `Investigation: ${investigation.operationKey} (${investigation.occurrences.length} calls, expected 1)`,
+  );
+
+  // --- TIMELINE table ---
+  lines.push('');
+  lines.push('TIMELINE');
+  const timelineTable = new Table({
+    head: ['#', 'Time', 'Status', 'Phase', 'Delta'],
+    style: { head: ['cyan'] },
+  });
+  for (let i = 0; i < investigation.occurrences.length; i++) {
+    const occ = investigation.occurrences[i];
+    const time = occ.capturedAt.slice(0, 19).replace('T', ' ');
+    const status = occ.statusCode !== undefined ? occ.statusCode.toString() : '';
+    const phase = occ.phase ?? '';
+    let delta = '\u2014'; // em dash
+    if (i > 0) {
+      const prev = investigation.occurrences[i - 1];
+      const deltaMs =
+        new Date(occ.capturedAt).getTime() - new Date(prev.capturedAt).getTime();
+      delta = `+${(deltaMs / 1000).toFixed(1)}s`;
+    }
+    timelineTable.push([(i + 1).toString(), time, status, phase, delta]);
+  }
+  lines.push(timelineTable.toString());
+
+  // --- PAIR ANALYSIS ---
+  if (investigation.pairAnalyses.length > 0) {
+    lines.push('');
+    lines.push('PAIR ANALYSIS');
+    for (const pair of investigation.pairAnalyses) {
+      const fromIdx =
+        investigation.occurrences.findIndex((o) => o.sampleIndex === pair.fromIndex) + 1;
+      const toIdx =
+        investigation.occurrences.findIndex((o) => o.sampleIndex === pair.toIndex) + 1;
+      const deltaStr = `+${(pair.deltaMs / 1000).toFixed(1)}s`;
+
+      let phaseStr: string;
+      if (pair.crossPhase) {
+        const fromPhase = investigation.occurrences[fromIdx - 1]?.phase ?? '?';
+        const toPhase = investigation.occurrences[toIdx - 1]?.phase ?? '?';
+        phaseStr = `cross-phase (${fromPhase} \u2192 ${toPhase})`;
+      } else {
+        const phase = investigation.occurrences[fromIdx - 1]?.phase;
+        phaseStr = phase ? `same phase (${phase})` : 'same phase';
+      }
+
+      lines.push(`  Call ${fromIdx} \u2192 ${toIdx}:  ${deltaStr}, ${phaseStr}`);
+
+      // Request diff
+      if (pair.requestDiff) {
+        const changes =
+          pair.requestDiff.breakingChanges.length + pair.requestDiff.nonBreakingChanges.length;
+        lines.push(changes === 0 ? '    Request:  identical' : `    Request:  ${changes} fields changed`);
+      } else {
+        lines.push('    Request:  identical');
+      }
+
+      // Response diff
+      if (pair.responseDiff) {
+        const bc = pair.responseDiff.breakingChanges.length;
+        const nbc = pair.responseDiff.nonBreakingChanges.length;
+        if (bc === 0 && nbc === 0) {
+          lines.push('    Response: identical');
+        } else {
+          const parts: string[] = [];
+          if (bc > 0) parts.push(`${bc} breaking`);
+          if (nbc > 0) parts.push(`${nbc} non-breaking`);
+          lines.push(`    Response: ${parts.join(', ')} changes`);
+        }
+      } else {
+        lines.push('    Response: identical');
+      }
+
+      // Intervening ops
+      const between =
+        pair.interveningOps.length > 0 ? pair.interveningOps.join(', ') : '(none)';
+      lines.push(`    Between:  ${between}`);
+
+      // Cause
+      const causeFormatted = pair.cause.replace(/_/g, ' ');
+      lines.push(`    Cause:    ${causeFormatted}`);
+    }
+  }
+
+  // --- RECOMMENDATION ---
+  lines.push('');
+  lines.push(`RECOMMENDATION: ${investigation.recommendation}`);
 
   return lines.join('\n');
 }

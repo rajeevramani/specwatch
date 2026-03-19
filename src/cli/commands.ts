@@ -10,6 +10,7 @@
  *   sessions list         List all sessions
  *   sessions delete <id>  Delete a session
  *   diff <session1> <session2>  Compare schemas between sessions
+ *   investigate [session]       Deep-dive investigation of redundant calls
  */
 
 import { Command } from 'commander';
@@ -27,6 +28,7 @@ import { buildOpenApiDocument, serializeOpenApi, convertToOpenApi30 } from '../e
 import { buildJsonExport, serializeJson } from '../export/json.js';
 import { detectSequences } from '../analysis/sequences.js';
 import { detectPhases } from '../analysis/phases.js';
+import { investigateRedundantCalls, investigateOperation } from '../analysis/investigation.js';
 import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/completeness.js';
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
 import { extractJsonRpcFromBody, isJsonRpcSession } from '../analysis/jsonrpc.js';
@@ -45,6 +47,7 @@ import {
   formatDiff,
   formatSnapshotList,
   formatAgentReport,
+  formatInvestigation,
 } from './output.js';
 import { SpecwatchError, noActiveSessionError, sessionNotFoundError, sessionNameNotFoundError, noCompletedSessionsError } from './errors.js';
 import type { ExportOptions, AggregatedSchema, SessionConsumer } from '../types/index.js';
@@ -855,6 +858,13 @@ export function createProgram(): Command {
         // Detect phases from sample timing
         const phaseAnalysis = detectPhases(samples);
 
+        // Investigate redundant calls
+        const investigationReport = investigateRedundantCalls(
+          samples,
+          sequenceAnalysis.redundantCalls,
+          phaseAnalysis,
+        );
+
         // Format and output
         const sessionName = session.name ?? session.id.slice(0, 8);
         const output = formatAgentReport(
@@ -863,8 +873,79 @@ export function createProgram(): Command {
           completenessReport,
           session.sampleCount,
           phaseAnalysis,
+          investigationReport,
         );
         process.stdout.write(output + '\n');
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  // ========== investigate ==========
+  program
+    .command('investigate')
+    .description('Deep-dive investigation of redundant API calls')
+    .argument('[session-id]', 'Session ID (defaults to latest completed)')
+    .option('--tool <name>', 'Investigate a specific tool/operation')
+    .option('--name <name>', 'Session name')
+    .action((sessionId: string | undefined, opts: Record<string, string | undefined>) => {
+      try {
+        const db = getDatabase();
+        const sessions = new SessionRepository(db);
+
+        // Resolve session (same pattern as export command)
+        const targetId = resolveSessionId(sessions, sessionId, opts['name'], 'latest');
+        const session = sessions.getSession(targetId)!;
+
+        // Validate consumer type
+        if (session.consumer !== 'agent') {
+          throw new SpecwatchError(
+            'investigate requires a session captured with --consumer agent',
+            'Start a session with: specwatch start <url> --consumer agent',
+          );
+        }
+
+        // Load samples
+        const sampleRepo = new SampleRepository(db);
+        const samples = sampleRepo.listBySession(targetId);
+        if (samples.length === 0) {
+          throw new SpecwatchError(
+            'No samples found for this session.',
+            'Capture some traffic first.',
+          );
+        }
+
+        // Run analysis
+        const sequenceAnalysis = detectSequences(db, targetId);
+        const phaseAnalysis = detectPhases(samples);
+
+        if (opts['tool']) {
+          // Investigate a specific tool/operation
+          const investigation = investigateOperation(samples, opts['tool'], phaseAnalysis);
+          if (investigation.occurrences.length === 0) {
+            throw new SpecwatchError(
+              `No calls found for operation "${opts['tool']}"`,
+              'Check the operation key with: specwatch agent-report',
+            );
+          }
+          process.stdout.write(formatInvestigation(investigation) + '\n');
+        } else {
+          // Investigate all redundant calls
+          if (sequenceAnalysis.redundantCalls.length === 0) {
+            info('No redundant calls detected in this session.');
+            return;
+          }
+
+          const report = investigateRedundantCalls(
+            samples,
+            sequenceAnalysis.redundantCalls,
+            phaseAnalysis,
+          );
+
+          for (const investigation of report.investigations) {
+            process.stdout.write(formatInvestigation(investigation) + '\n\n');
+          }
+        }
       } catch (err) {
         handleError(err);
       }

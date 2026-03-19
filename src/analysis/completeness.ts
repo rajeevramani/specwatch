@@ -229,15 +229,39 @@ function getToolResourceSuffix(toolName: string): string {
 }
 
 /**
+ * Normalize a resource name for fuzzy matching: lowercase, strip trailing s/es.
+ * e.g., "clusters" → "cluster", "routes" → "route", "addresses" → "address"
+ */
+function normalizeResource(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('ses') || lower.endsWith('xes') || lower.endsWith('zes')) {
+    return lower.slice(0, -2); // addresses → address
+  }
+  if (lower.endsWith('ies')) {
+    return lower.slice(0, -3) + 'y'; // entries → entry
+  }
+  if (lower.endsWith('s') && !lower.endsWith('ss')) {
+    return lower.slice(0, -1); // clusters → cluster
+  }
+  return lower;
+}
+
+/**
  * Find a matching read tool for a write tool.
- * Matches by shared resource suffix (e.g., create_cluster → get_cluster).
+ * Matches by shared resource suffix, with plural normalization.
+ * e.g., create_cluster matches list_clusters, create_route matches list_routes.
  */
 export function findMatchingReadTool(
   writeTool: string,
   readTools: string[],
 ): string | undefined {
   const suffix = getToolResourceSuffix(writeTool);
-  return readTools.find((rt) => getToolResourceSuffix(rt) === suffix);
+  const normalized = normalizeResource(suffix);
+  // Exact match first
+  const exact = readTools.find((rt) => getToolResourceSuffix(rt) === suffix);
+  if (exact) return exact;
+  // Fuzzy match with plural normalization
+  return readTools.find((rt) => normalizeResource(getToolResourceSuffix(rt)) === normalized);
 }
 
 // ---------------------------------------------------------------------------

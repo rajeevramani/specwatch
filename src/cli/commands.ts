@@ -31,7 +31,7 @@ import { detectPhases } from '../analysis/phases.js';
 import { investigateRedundantCalls, investigateOperation } from '../analysis/investigation.js';
 import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/completeness.js';
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
-import { extractJsonRpcFromBody, isJsonRpcSession } from '../analysis/jsonrpc.js';
+import { extractJsonRpcFromBody, isJsonRpcSession, unwrapMcpResponse } from '../analysis/jsonrpc.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
 import {
   info,
@@ -276,12 +276,19 @@ export function createProgram(): Command {
               return;
             }
 
+            // Extract JSON-RPC method and tool name if present
+            const jsonrpc = extractJsonRpcFromBody(pair.requestBody);
+
             // Infer schemas
             const requestSchema = pair.requestBody !== undefined
               ? inferSchema(pair.requestBody)
               : undefined;
-            const responseSchema = pair.responseBody !== undefined
-              ? inferSchema(pair.responseBody)
+            // Unwrap MCP tool responses to infer schema from actual content
+            const responseBody = jsonrpc?.method?.startsWith('tools/')
+              ? unwrapMcpResponse(pair.responseBody)
+              : pair.responseBody;
+            const responseSchema = responseBody !== undefined
+              ? inferSchema(responseBody)
               : undefined;
 
             // Normalize path
@@ -289,9 +296,6 @@ export function createProgram(): Command {
 
             // Parse query params
             const queryParams = parseQueryParams(pair.url);
-
-            // Extract JSON-RPC method and tool name if present
-            const jsonrpc = extractJsonRpcFromBody(pair.requestBody);
 
             // Insert sample
             sampleRepo.insertSample({

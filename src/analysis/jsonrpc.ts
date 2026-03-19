@@ -126,6 +126,67 @@ export function extractJsonRpcFromBody(
 }
 
 // ---------------------------------------------------------------------------
+// MCP Response Unwrapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks if a response body has the shape of an MCP tool response:
+ * `{ jsonrpc: "2.0", result: { content: [{ type: "text", text: string }] } }`
+ */
+export function isMcpToolResponse(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+
+  const obj = body as Record<string, unknown>;
+  if (obj.jsonrpc !== '2.0') return false;
+
+  const result = obj.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+
+  const content = (result as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return false;
+
+  return content.some(
+    (entry) =>
+      entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'text' && typeof (entry as Record<string, unknown>).text === 'string',
+  );
+}
+
+/**
+ * Extracts actual tool output from an MCP JSON-RPC response.
+ *
+ * Navigates to `result.content`, finds the first `{ type: "text", text: string }` entry,
+ * and attempts to JSON.parse the text. Returns the parsed result on success,
+ * or the original body on any failure.
+ */
+export function unwrapMcpResponse(responseBody: unknown): unknown {
+  if (!responseBody || typeof responseBody !== 'object' || Array.isArray(responseBody)) {
+    return responseBody;
+  }
+
+  const obj = responseBody as Record<string, unknown>;
+  if (obj.jsonrpc !== '2.0') return responseBody;
+
+  const result = obj.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return responseBody;
+
+  const content = (result as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return responseBody;
+
+  const textEntry = content.find(
+    (entry) =>
+      entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'text' && typeof (entry as Record<string, unknown>).text === 'string',
+  );
+
+  if (!textEntry) return responseBody;
+
+  try {
+    return JSON.parse((textEntry as Record<string, unknown>).text as string);
+  } catch {
+    return responseBody;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

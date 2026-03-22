@@ -57,16 +57,24 @@ export async function explainInvestigation(
     if (!raw) return undefined;
 
     // Strip markdown fences — some models wrap JSON in ```json ... ```
-    const content = raw.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/, '');
+    let content = raw.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/, '');
+
+    // Extract JSON object from surrounding text (model may prepend preamble)
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      content = jsonMatch[0];
+    }
 
     const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (typeof parsed.explanation !== 'string' || typeof parsed.recommendation !== 'string') {
+    if (typeof parsed.explanation !== 'string') {
       return undefined;
     }
 
     return {
       explanation: parsed.explanation,
-      recommendation: parsed.recommendation,
+      recommendation: typeof parsed.recommendation === 'string'
+        ? parsed.recommendation
+        : investigation.recommendation,  // fall back to heuristic
     };
   } catch {
     return undefined;

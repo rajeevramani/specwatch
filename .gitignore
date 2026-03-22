@@ -9,6 +9,8 @@ coverage/
 build-docs/
 spec.yaml
 .DS_Store
+adapters/
 
 # Dolt database files (added by bd init)
 .dolt/
+.specwatch-model-prep

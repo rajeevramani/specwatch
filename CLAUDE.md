@@ -5,7 +5,7 @@ Operates as a local reverse proxy: `npx specwatch start https://api.example.com`
 
 ## Status
 
-v0.1.0 implemented and tested. 806 tests passing across 27 test files.
+v0.3.0 implemented and tested. 1037 tests passing across 40 test files.
 - Design docs: `build-docs/plans/` (PLAN.md, TASKS.md)
 - Backlog: `build-docs/plans/BACKLOG.md` (improvements from real-world testing)
 - Tested against MockBank Financial API (72 endpoints, 200 samples). See BACKLOG.md for findings.

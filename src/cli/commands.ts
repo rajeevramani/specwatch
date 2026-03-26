@@ -122,7 +122,7 @@ export function createProgram(): Command {
   program
     .name('specwatch')
     .description('Learn API schemas from live traffic and generate OpenAPI specs')
-    .version('0.1.0')
+    .version('0.3.0')
     .option('-v, --verbose', 'Enable verbose output')
     .option('-q, --quiet', 'Suppress non-essential output')
     .hook('preAction', (thisCommand) => {

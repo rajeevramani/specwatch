@@ -5,7 +5,11 @@
 
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import type { Session, AggregatedSchema, SchemaDiff } from '../types/index.js';
+import type { Session, AggregatedSchema, SchemaDiff, Sample } from '../types/index.js';
+import type { SequenceAnalysis } from '../analysis/sequences.js';
+import type { CompletenessReport } from '../analysis/completeness.js';
+import type { PhaseAnalysis } from '../analysis/phases.js';
+import type { CallInvestigation, InvestigationReport } from '../analysis/investigation.js';
 
 let verboseMode = false;
 let quietMode = false;
@@ -60,6 +64,7 @@ export function formatStatus(session: Session): string {
   lines.push(`Proxy:   http://localhost:${session.port}`);
   lines.push(`Samples: ${session.sampleCount}${session.skippedCount > 0 ? ` (${session.skippedCount} skipped)` : ''}`);
   if (session.maxSamples) lines.push(`Max:     ${session.maxSamples}`);
+  if (session.consumer === 'agent') lines.push(`Consumer: agent`);
   lines.push(`Created: ${session.createdAt}`);
   if (session.errorMessage) lines.push(`Error:   ${session.errorMessage}`);
   return lines.join('\n');
@@ -177,6 +182,352 @@ export function formatDiff(diff: SchemaDiff, endpoint?: string): string {
       lines.push(`    [INFO] ${change}`);
     }
   }
+
+  return lines.join('\n');
+}
+
+/**
+ * Get the recommendation string for a verification loop pattern.
+ */
+function loopRecommendation(
+  loop: { pattern: string; fromMethod: string; toMethod: string },
+  isJsonRpc: boolean,
+): string {
+  if (isJsonRpc) {
+    if (loop.pattern === 'retry') return 'Check error handling';
+    if (loop.pattern === 'redundant_list') return 'Cache tool list';
+    return 'Enrich write response';
+  }
+  return `Enrich ${loop.fromMethod} response to eliminate ${loop.toMethod}`;
+}
+
+/**
+ * Format the pattern label for a verification loop.
+ */
+function loopPatternLabel(
+  loop: { fromMethod: string; fromPath: string; toMethod: string; toPath: string },
+  isJsonRpc: boolean,
+): string {
+  if (isJsonRpc) {
+    const from = loop.fromPath.replace(/^tools\/call:/, '');
+    const to = loop.toPath.replace(/^tools\/call:/, '');
+    return `${from} → ${to}`;
+  }
+  return `${loop.fromMethod} ${loop.fromPath} → ${loop.toMethod} ${loop.toPath}`;
+}
+
+export function formatAgentReport(
+  sessionName: string,
+  sequenceAnalysis: SequenceAnalysis,
+  completenessReport: CompletenessReport,
+  totalSamples: number,
+  phaseAnalysis?: PhaseAnalysis,
+  investigationReport?: InvestigationReport,
+  samples?: Sample[],
+): string {
+  const lines: string[] = [];
+
+  // Detect JSON-RPC mode from analysis data
+  const isJsonRpc =
+    sequenceAnalysis.sequences.some(
+      (s) => s.fromPath.includes('tools/') || s.toPath.includes('tools/'),
+    ) ||
+    completenessReport.endpoints.some((e) => e.method === 'tools/call') ||
+    sequenceAnalysis.toolUsage.some(
+      (t) => t.operationKey.startsWith('tools/') || t.operationKey === 'initialize',
+    );
+  const entityLabel = isJsonRpc ? 'tools' : 'endpoints';
+
+  // Header — count distinct tools/endpoints from toolUsage (sample-derived), not completeness report
+  const distinctCount =
+    sequenceAnalysis.toolUsage.length > 0
+      ? sequenceAnalysis.toolUsage.length
+      : completenessReport.endpoints.length;
+
+  lines.push(
+    `Agent-Friendliness Report: ${sessionName} (${totalSamples} samples, ${distinctCount} ${entityLabel})`,
+  );
+
+  // --- TOOL USAGE table ---
+  if (sequenceAnalysis.toolUsage.length > 0) {
+    lines.push('');
+    lines.push('TOOL USAGE');
+    const usageTable = new Table({
+      head: ['Tool', 'Calls', 'Status'],
+      style: { head: ['cyan'] },
+    });
+    for (const tool of sequenceAnalysis.toolUsage) {
+      const label = isJsonRpc
+        ? tool.operationKey.replace(/^tools\/call:/, '')
+        : tool.operationKey;
+      usageTable.push([
+        label,
+        tool.count.toString(),
+        tool.isRedundant ? 'redundant' : '',
+      ]);
+    }
+    lines.push(usageTable.toString());
+  }
+
+  // --- PHASES table ---
+  if (phaseAnalysis && phaseAnalysis.phases.length > 0) {
+    lines.push('');
+    lines.push('PHASES');
+    const phaseTable = new Table({
+      head: ['Phase', 'Tools', 'Duration', 'Samples'],
+      style: { head: ['cyan'] },
+      colWidths: [null, 50, null, null],
+      wordWrap: true,
+    });
+    for (const phase of phaseAnalysis.phases) {
+      const uniqueTools = [...new Set(phase.samples.map((s) => {
+        const label = s.toolName ?? s.operationKey;
+        return isJsonRpc ? label.replace(/^tools\/call:/, '') : label;
+      }))];
+      const toolsStr = uniqueTools.join(', ');
+      const durationStr = phase.duration < 1000
+        ? `${phase.duration}ms`
+        : `${(phase.duration / 1000).toFixed(1)}s`;
+      phaseTable.push([
+        phase.name,
+        toolsStr,
+        durationStr,
+        phase.samples.length.toString(),
+      ]);
+    }
+    lines.push(phaseTable.toString());
+
+    // Show full tool call sequence
+    const allPhaseSamples = phaseAnalysis.phases.flatMap((phase) =>
+      phase.samples.map((s) => ({ ...s, phase: phase.name })),
+    );
+    allPhaseSamples.sort((a, b) => a.index - b.index);
+
+    if (allPhaseSamples.length > 0) {
+      lines.push('');
+      lines.push('CALL SEQUENCE');
+      const seqTable = new Table({
+        head: ['#', 'Tool', 'Phase', 'Status'],
+        style: { head: ['cyan'] },
+      });
+      for (let i = 0; i < allPhaseSamples.length; i++) {
+        const ps = allPhaseSamples[i];
+        const label = isJsonRpc
+          ? (ps.toolName ?? ps.operationKey).replace(/^tools\/call:/, '')
+          : ps.operationKey;
+        const status = samples?.[ps.index]?.statusCode?.toString() ?? '';
+        seqTable.push([(i + 1).toString(), label, ps.phase, status]);
+      }
+      lines.push(seqTable.toString());
+    }
+  }
+
+  // --- VERIFICATION LOOPS table ---
+  lines.push('');
+  lines.push('VERIFICATION LOOPS');
+  const loops = [...sequenceAnalysis.verificationLoops].sort((a, b) => b.count - a.count);
+  if (loops.length === 0) {
+    lines.push('  No verification loops detected.');
+  } else {
+    const loopTable = new Table({
+      head: ['Pattern', 'Occurrences', 'Avg Delay', 'Recommendation'],
+      style: { head: ['cyan'] },
+    });
+    for (const loop of loops) {
+      loopTable.push([
+        loopPatternLabel(loop, isJsonRpc),
+        loop.count.toString(),
+        `${loop.avgDelayMs}ms`,
+        loopRecommendation(loop, isJsonRpc),
+      ]);
+    }
+    lines.push(loopTable.toString());
+  }
+
+  // --- REDUNDANT CALLS table (JSON-RPC only) ---
+  if (sequenceAnalysis.redundantCalls.length > 0) {
+    lines.push('');
+    lines.push('REDUNDANT CALLS');
+    const hasInvestigation = investigationReport && investigationReport.investigations.length > 0;
+    const redundantHead = hasInvestigation
+      ? ['Tool', 'Actual', 'Expected', 'Wasted', 'Why']
+      : ['Tool', 'Actual', 'Expected', 'Wasted'];
+    const redundantTable = new Table({
+      head: redundantHead,
+      style: { head: ['cyan'] },
+      ...(hasInvestigation
+        ? { wordWrap: true, colWidths: [undefined, 8, 10, 8, 46] }
+        : {}),
+    });
+    for (const r of sequenceAnalysis.redundantCalls) {
+      const extra = r.count - r.expectedCount;
+      const label = isJsonRpc
+        ? r.operationKey.replace(/^tools\/call:/, '')
+        : r.operationKey;
+      const row: string[] = [
+        label,
+        r.count.toString(),
+        r.expectedCount.toString(),
+        extra.toString(),
+      ];
+      if (hasInvestigation) {
+        const inv = investigationReport!.investigations.find(
+          (i) => i.operationKey === r.operationKey,
+        );
+        row.push(inv ? inv.explanation : '');
+      }
+      redundantTable.push(row);
+    }
+    lines.push(redundantTable.toString());
+  }
+
+  // --- THIN RESPONSES ---
+  lines.push('');
+  lines.push('THIN RESPONSES');
+  const thin = [...completenessReport.thinResponses].sort(
+    (a, b) => a.completenessScore - b.completenessScore,
+  );
+  if (thin.length === 0) {
+    // For JSON-RPC sessions with no matched write/read pairs, show MCP-specific message
+    const hasFieldData = completenessReport.endpoints.length > 0;
+    if (isJsonRpc && !hasFieldData) {
+      const noteTable = new Table({
+        head: ['Note'],
+        style: { head: ['cyan'] },
+      });
+      noteTable.push(['MCP responses use text content — field-level scoring not available']);
+      lines.push(noteTable.toString());
+    } else {
+      lines.push('  All write responses return adequate data.');
+    }
+  } else {
+    for (const endpoint of thin) {
+      const pct = Math.round(endpoint.completenessScore * 100);
+      // JSON-RPC: path is "tools/call:tool_name", display just the tool name
+      const label = isJsonRpc
+        ? endpoint.path.replace(/^tools\/call:/, '')
+        : `${endpoint.method} ${endpoint.path}`;
+      lines.push(
+        `  ${label} — ${pct}% complete (${endpoint.writeFieldCount} of ${endpoint.readFieldCount} fields)`,
+      );
+      if (endpoint.missingFields.length > 0) {
+        const MAX_FIELDS = 5;
+        const shown = endpoint.missingFields.slice(0, MAX_FIELDS);
+        const remaining = endpoint.missingFields.length - MAX_FIELDS;
+        const fieldList =
+          remaining > 0 ? `${shown.join(', ')}, ... and ${remaining} more` : shown.join(', ');
+        lines.push(`    Missing: ${fieldList}`);
+      }
+    }
+  }
+
+  // --- SUMMARY ---
+  lines.push('');
+  lines.push('SUMMARY');
+  const { totalRequests, wastedRequests } = sequenceAnalysis;
+  const wastedPct = totalRequests > 0 ? Math.round((wastedRequests / totalRequests) * 100) : 0;
+  lines.push(`  Wasted requests: ${wastedRequests} of ${totalRequests} (${wastedPct}%)`);
+  lines.push(`  Avg response completeness: ${completenessReport.avgCompleteness.toFixed(2)}`);
+
+  return lines.join('\n');
+}
+
+/**
+ * Format a detailed investigation of a single redundant operation.
+ * Used by the `investigate` command for deep-dive analysis.
+ */
+export function formatInvestigation(investigation: CallInvestigation): string {
+  const lines: string[] = [];
+
+  lines.push(
+    `Investigation: ${investigation.operationKey} (${investigation.occurrences.length} calls, expected 1)`,
+  );
+
+  // --- TIMELINE table ---
+  lines.push('');
+  lines.push('TIMELINE');
+  const timelineTable = new Table({
+    head: ['#', 'Time', 'Status', 'Phase', 'Delta'],
+    style: { head: ['cyan'] },
+  });
+  for (let i = 0; i < investigation.occurrences.length; i++) {
+    const occ = investigation.occurrences[i];
+    const time = occ.capturedAt.slice(0, 19).replace('T', ' ');
+    const status = occ.statusCode !== undefined ? occ.statusCode.toString() : '';
+    const phase = occ.phase ?? '';
+    let delta = '\u2014'; // em dash
+    if (i > 0) {
+      const prev = investigation.occurrences[i - 1];
+      const deltaMs =
+        new Date(occ.capturedAt).getTime() - new Date(prev.capturedAt).getTime();
+      delta = `+${(deltaMs / 1000).toFixed(1)}s`;
+    }
+    timelineTable.push([(i + 1).toString(), time, status, phase, delta]);
+  }
+  lines.push(timelineTable.toString());
+
+  // --- PAIR ANALYSIS ---
+  if (investigation.pairAnalyses.length > 0) {
+    lines.push('');
+    lines.push('PAIR ANALYSIS');
+    for (const pair of investigation.pairAnalyses) {
+      const fromIdx =
+        investigation.occurrences.findIndex((o) => o.sampleIndex === pair.fromIndex) + 1;
+      const toIdx =
+        investigation.occurrences.findIndex((o) => o.sampleIndex === pair.toIndex) + 1;
+      const deltaStr = `+${(pair.deltaMs / 1000).toFixed(1)}s`;
+
+      let phaseStr: string;
+      if (pair.crossPhase) {
+        const fromPhase = investigation.occurrences[fromIdx - 1]?.phase ?? '?';
+        const toPhase = investigation.occurrences[toIdx - 1]?.phase ?? '?';
+        phaseStr = `cross-phase (${fromPhase} \u2192 ${toPhase})`;
+      } else {
+        const phase = investigation.occurrences[fromIdx - 1]?.phase;
+        phaseStr = phase ? `same phase (${phase})` : 'same phase';
+      }
+
+      lines.push(`  Call ${fromIdx} \u2192 ${toIdx}:  ${deltaStr}, ${phaseStr}`);
+
+      // Request diff
+      if (pair.requestDiff) {
+        const changes =
+          pair.requestDiff.breakingChanges.length + pair.requestDiff.nonBreakingChanges.length;
+        lines.push(changes === 0 ? '    Request:  identical' : `    Request:  ${changes} fields changed`);
+      } else {
+        lines.push('    Request:  identical');
+      }
+
+      // Response diff
+      if (pair.responseDiff) {
+        const bc = pair.responseDiff.breakingChanges.length;
+        const nbc = pair.responseDiff.nonBreakingChanges.length;
+        if (bc === 0 && nbc === 0) {
+          lines.push('    Response: identical');
+        } else {
+          const parts: string[] = [];
+          if (bc > 0) parts.push(`${bc} breaking`);
+          if (nbc > 0) parts.push(`${nbc} non-breaking`);
+          lines.push(`    Response: ${parts.join(', ')} changes`);
+        }
+      } else {
+        lines.push('    Response: identical');
+      }
+
+      // Intervening ops
+      const between =
+        pair.interveningOps.length > 0 ? pair.interveningOps.join(', ') : '(none)';
+      lines.push(`    Between:  ${between}`);
+
+      // Cause
+      const causeFormatted = pair.cause.replace(/_/g, ' ');
+      lines.push(`    Cause:    ${causeFormatted}`);
+    }
+  }
+
+  // --- RECOMMENDATION ---
+  lines.push('');
+  lines.push(`RECOMMENDATION: ${investigation.recommendation}`);
 
   return lines.join('\n');
 }

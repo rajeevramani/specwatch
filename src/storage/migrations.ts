@@ -123,10 +123,35 @@ const INITIAL_SCHEMA: Migration = {
  *     },
  *   }
  */
+// ---------------------------------------------------------------------------
+// v2 — Add consumer column to sessions
+// ---------------------------------------------------------------------------
+
+const ADD_CONSUMER_COLUMN: Migration = {
+  version: 2,
+  description: 'Add consumer column to sessions table',
+  up: (db) => {
+    db.exec(`ALTER TABLE sessions ADD COLUMN consumer TEXT NOT NULL DEFAULT 'human'`);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// v3 — Add JSON-RPC columns to samples
+// ---------------------------------------------------------------------------
+
+const ADD_JSONRPC_COLUMNS: Migration = {
+  version: 3,
+  description: 'Add jsonrpc_method and jsonrpc_tool columns to samples table',
+  up: (db) => {
+    db.exec(`ALTER TABLE samples ADD COLUMN jsonrpc_method TEXT`);
+    db.exec(`ALTER TABLE samples ADD COLUMN jsonrpc_tool TEXT`);
+  },
+};
+
 export const MIGRATIONS: Migration[] = [
   INITIAL_SCHEMA,
-  // Future migrations go here, e.g.:
-  // { version: 2, description: '...', up: (db) => { ... } },
+  ADD_CONSUMER_COLUMN,
+  ADD_JSONRPC_COLUMNS,
 ];
 
 /** The schema version that a fully-migrated database should be at. */

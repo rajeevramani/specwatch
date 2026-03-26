@@ -10,6 +10,7 @@
  *   sessions list         List all sessions
  *   sessions delete <id>  Delete a session
  *   diff <session1> <session2>  Compare schemas between sessions
+ *   investigate [session]       Deep-dive investigation of redundant calls
  */
 
 import { Command } from 'commander';
@@ -25,6 +26,13 @@ import { runAggregation } from '../aggregation/pipeline.js';
 import { detectBreakingChanges } from '../aggregation/diff.js';
 import { buildOpenApiDocument, serializeOpenApi, convertToOpenApi30 } from '../export/openapi.js';
 import { buildJsonExport, serializeJson } from '../export/json.js';
+import { detectSequences } from '../analysis/sequences.js';
+import { detectPhases } from '../analysis/phases.js';
+import { investigateRedundantCalls, investigateOperation } from '../analysis/investigation.js';
+import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/completeness.js';
+import { buildAgentExtensions } from '../analysis/agent-extensions.js';
+import { extractJsonRpcFromBody, isJsonRpcSession, unwrapMcpResponse } from '../analysis/jsonrpc.js';
+import type { AgentExtension } from '../analysis/agent-extensions.js';
 import {
   info,
   success,
@@ -38,9 +46,13 @@ import {
   formatAggregationSummary,
   formatDiff,
   formatSnapshotList,
+  formatAgentReport,
+  formatInvestigation,
 } from './output.js';
 import { SpecwatchError, noActiveSessionError, sessionNotFoundError, sessionNameNotFoundError, noCompletedSessionsError } from './errors.js';
-import type { ExportOptions, AggregatedSchema } from '../types/index.js';
+import { loadLlmConfig } from '../llm/config.js';
+import { explainAllInvestigations } from '../llm/client.js';
+import type { ExportOptions, AggregatedSchema, SessionConsumer } from '../types/index.js';
 
 /**
  * Resolve a session by ID, name, or fallback strategy.
@@ -110,7 +122,7 @@ export function createProgram(): Command {
   program
     .name('specwatch')
     .description('Learn API schemas from live traffic and generate OpenAPI specs')
-    .version('0.1.0')
+    .version('0.3.0')
     .option('-v, --verbose', 'Enable verbose output')
     .option('-q, --quiet', 'Suppress non-essential output')
     .hook('preAction', (thisCommand) => {
@@ -128,6 +140,7 @@ export function createProgram(): Command {
     .option('-n, --name <name>', 'Session name')
     .option('--max-samples <count>', 'Maximum samples to capture')
     .option('--auto-aggregate', 'Auto-aggregate every --max-samples and continue capturing')
+    .option('--consumer <type>', 'Consumer type: human or agent', 'human')
     .action(async (url: string, opts: Record<string, string>) => {
       try {
         const port = parseInt(opts['port'], 10);
@@ -136,6 +149,13 @@ export function createProgram(): Command {
         }
 
         const maxSamples = opts['maxSamples'] ? parseInt(opts['maxSamples'], 10) : undefined;
+        const consumer = opts['consumer'] as string;
+        if (consumer !== 'human' && consumer !== 'agent') {
+          throw new SpecwatchError(
+            `Invalid consumer type: '${consumer}'.`,
+            "Use --consumer human or --consumer agent.",
+          );
+        }
         const autoAggregate = opts['autoAggregate'] === true || opts['autoAggregate'] === '';
         if (autoAggregate && maxSamples === undefined) {
           throw new SpecwatchError(
@@ -169,7 +189,7 @@ export function createProgram(): Command {
           );
         }
 
-        const session = sessions.createSession(targetUrl, port, opts['name'], maxSamples);
+        const session = sessions.createSession(targetUrl, port, opts['name'], maxSamples, consumer as SessionConsumer);
 
         const _proxy = new ProxyServer({
           targetUrl,
@@ -256,12 +276,19 @@ export function createProgram(): Command {
               return;
             }
 
+            // Extract JSON-RPC method and tool name if present
+            const jsonrpc = extractJsonRpcFromBody(pair.requestBody);
+
             // Infer schemas
             const requestSchema = pair.requestBody !== undefined
               ? inferSchema(pair.requestBody)
               : undefined;
-            const responseSchema = pair.responseBody !== undefined
-              ? inferSchema(pair.responseBody)
+            // Unwrap MCP tool responses to infer schema from actual content
+            const responseBody = jsonrpc?.method?.startsWith('tools/')
+              ? unwrapMcpResponse(pair.responseBody)
+              : pair.responseBody;
+            const responseSchema = responseBody !== undefined
+              ? inferSchema(responseBody)
               : undefined;
 
             // Normalize path
@@ -283,6 +310,8 @@ export function createProgram(): Command {
               requestHeaders: pair.requestHeaders,
               responseHeaders: pair.responseHeaders,
               capturedAt: pair.capturedAt,
+              jsonrpcMethod: jsonrpc?.method,
+              jsonrpcTool: jsonrpc?.tool,
             });
 
             sessions.incrementSampleCount(session.id);
@@ -558,7 +587,28 @@ export function createProgram(): Command {
             includeMetadata: opts['includeMetadata'] === true,
           };
 
-          let doc = buildOpenApiDocument(filtered, exportOptions);
+          // Build agent extensions for agent sessions
+          let agentExtensionsMap: Record<string, AgentExtension> | undefined;
+          const session = sessions.getSession(targetId);
+          if (session?.consumer === 'agent') {
+            const sequenceAnalysis = detectSequences(db, targetId);
+            const sampleRepo = new SampleRepository(db);
+            const samples = sampleRepo.listBySession(targetId);
+            const jsonRpc = isJsonRpcSession(samples);
+            const completenessReport = jsonRpc
+              ? analyzeJsonRpcCompleteness(samples)
+              : analyzeCompleteness(filtered);
+            agentExtensionsMap = buildAgentExtensions(
+              sequenceAnalysis,
+              completenessReport,
+              jsonRpc,
+            );
+            if (Object.keys(agentExtensionsMap).length === 0) {
+              agentExtensionsMap = undefined;
+            }
+          }
+
+          let doc = buildOpenApiDocument(filtered, exportOptions, agentExtensionsMap);
           const openapiVersion = opts['openapiVersion'] as string | undefined;
           if (openapiVersion === '3.0') {
             doc = convertToOpenApi30(doc);
@@ -764,6 +814,176 @@ export function createProgram(): Command {
 
         if (!hasChanges) {
           info('No differences found between the two sessions.');
+        }
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  // ========== agent-report ==========
+  program
+    .command('agent-report')
+    .description('Analyze agent traffic patterns and API friendliness')
+    .argument('[session-id]', 'Session ID (defaults to latest completed)')
+    .option('--name <name>', 'Session name')
+    .option('--explain', 'Use LLM for richer explanations')
+    .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
+      try {
+        const db = getDatabase();
+        const sessions = new SessionRepository(db);
+        const schemaRepo = new AggregatedSchemaRepository(db);
+
+        // Resolve session (same pattern as export command)
+        const targetId = resolveSessionId(sessions, sessionId, opts['name'] as string | undefined, 'latest');
+        const session = sessions.getSession(targetId)!;
+
+        // Validate consumer type
+        if (session.consumer !== 'agent') {
+          throw new SpecwatchError(
+            'agent-report requires a session captured with --consumer agent',
+            'Start a session with: specwatch start <url> --consumer agent',
+          );
+        }
+
+        // Get aggregated schemas
+        const schemas = schemaRepo.listBySessionLatestSnapshot(targetId);
+        if (schemas.length === 0) {
+          throw new SpecwatchError(
+            'No schemas found for this session.',
+            'Run aggregation first: specwatch aggregate',
+          );
+        }
+
+        // Run analysis — use JSON-RPC completeness for MCP-style sessions
+        const sequenceAnalysis = detectSequences(db, targetId);
+        const sampleRepo = new SampleRepository(db);
+        const samples = sampleRepo.listBySession(targetId);
+        const completenessReport = isJsonRpcSession(samples)
+          ? analyzeJsonRpcCompleteness(samples)
+          : analyzeCompleteness(schemas);
+
+        // Detect phases from sample timing
+        const phaseAnalysis = detectPhases(samples);
+
+        // Investigate redundant calls
+        let investigationReport = investigateRedundantCalls(
+          samples,
+          sequenceAnalysis.redundantCalls,
+          phaseAnalysis,
+        );
+
+        // LLM-enhanced explanations
+        if (opts['explain']) {
+          const llmConfig = loadLlmConfig();
+          if (!llmConfig) {
+            warn('LLM not configured — set LLM_BASE_URL and LLM_API_KEY (or add a .env file). Continuing with heuristic explanations.');
+          } else {
+            investigationReport = await explainAllInvestigations(investigationReport, llmConfig);
+          }
+        }
+
+        // Format and output
+        const sessionName = session.name ?? session.id.slice(0, 8);
+        const output = formatAgentReport(
+          sessionName,
+          sequenceAnalysis,
+          completenessReport,
+          session.sampleCount,
+          phaseAnalysis,
+          investigationReport,
+          samples,
+        );
+        process.stdout.write(output + '\n');
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  // ========== investigate ==========
+  program
+    .command('investigate')
+    .description('Deep-dive investigation of redundant API calls')
+    .argument('[session-id]', 'Session ID (defaults to latest completed)')
+    .option('--tool <name>', 'Investigate a specific tool/operation')
+    .option('--name <name>', 'Session name')
+    .option('--explain', 'Use LLM for richer explanations')
+    .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
+      try {
+        const db = getDatabase();
+        const sessions = new SessionRepository(db);
+
+        // Resolve session (same pattern as export command)
+        const targetId = resolveSessionId(sessions, sessionId, opts['name'] as string | undefined, 'latest');
+        const session = sessions.getSession(targetId)!;
+
+        // Validate consumer type
+        if (session.consumer !== 'agent') {
+          throw new SpecwatchError(
+            'investigate requires a session captured with --consumer agent',
+            'Start a session with: specwatch start <url> --consumer agent',
+          );
+        }
+
+        // Load samples
+        const sampleRepo = new SampleRepository(db);
+        const samples = sampleRepo.listBySession(targetId);
+        if (samples.length === 0) {
+          throw new SpecwatchError(
+            'No samples found for this session.',
+            'Capture some traffic first.',
+          );
+        }
+
+        // Run analysis
+        const sequenceAnalysis = detectSequences(db, targetId);
+        const phaseAnalysis = detectPhases(samples);
+
+        // Load LLM config if --explain
+        let llmConfig: ReturnType<typeof loadLlmConfig> = undefined;
+        if (opts['explain']) {
+          llmConfig = loadLlmConfig();
+          if (!llmConfig) {
+            warn('LLM not configured — set LLM_BASE_URL and LLM_API_KEY (or add a .env file). Continuing with heuristic explanations.');
+          }
+        }
+
+        if (opts['tool']) {
+          // Investigate a specific tool/operation
+          let investigation = investigateOperation(samples, opts['tool'] as string, phaseAnalysis);
+          if (investigation.occurrences.length === 0) {
+            throw new SpecwatchError(
+              `No calls found for operation "${opts['tool']}"`,
+              'Check the operation key with: specwatch agent-report',
+            );
+          }
+          if (llmConfig) {
+            const enhanced = await explainAllInvestigations(
+              { sessionId: session.id, investigations: [investigation] },
+              llmConfig,
+            );
+            investigation = enhanced.investigations[0];
+          }
+          process.stdout.write(formatInvestigation(investigation) + '\n');
+        } else {
+          // Investigate all redundant calls
+          if (sequenceAnalysis.redundantCalls.length === 0) {
+            info('No redundant calls detected in this session.');
+            return;
+          }
+
+          let report = investigateRedundantCalls(
+            samples,
+            sequenceAnalysis.redundantCalls,
+            phaseAnalysis,
+          );
+
+          if (llmConfig) {
+            report = await explainAllInvestigations(report, llmConfig);
+          }
+
+          for (const investigation of report.investigations) {
+            process.stdout.write(formatInvestigation(investigation) + '\n\n');
+          }
         }
       } catch (err) {
         handleError(err);

@@ -5,7 +5,7 @@ Operates as a local reverse proxy: `npx specwatch start https://api.example.com`
 
 ## Status
 
-v0.1.0 implemented and tested. 806 tests passing across 27 test files.
+v0.3.0 implemented and tested. 1037 tests passing across 40 test files.
 - Design docs: `build-docs/plans/` (PLAN.md, TASKS.md)
 - Backlog: `build-docs/plans/BACKLOG.md` (improvements from real-world testing)
 - Tested against MockBank Financial API (72 endpoints, 200 samples). See BACKLOG.md for findings.
@@ -48,6 +48,10 @@ specwatch aggregate [session-id]
 specwatch export [--format openapi|json] [--session <id>] [--snapshot <n>] [--min-confidence 0.5]
 specwatch snapshots [session-id]
 specwatch diff <session1> <session2> [--snapshots <n1> <n2>]
+
+## Git Style
+
+- Keep commit messages short — one-line summary, no verbose body unless truly needed
 
 ## Key Design Decisions
 

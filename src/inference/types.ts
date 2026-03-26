@@ -54,6 +54,9 @@ export interface InferredSchema {
 /** Session lifecycle states */
 export type SessionStatus = 'active' | 'aggregating' | 'completed' | 'failed';
 
+/** Valid consumer types for a session */
+export type SessionConsumer = 'human' | 'agent';
+
 /** A proxy capture session */
 export interface Session {
   /** UUID identifier */
@@ -82,6 +85,8 @@ export interface Session {
   maxSamples?: number;
   /** Error message if session failed */
   errorMessage?: string;
+  /** Who is consuming this session: 'human' (default) or 'agent' */
+  consumer?: SessionConsumer;
 }
 
 // === Sample Types ===
@@ -112,6 +117,10 @@ export interface Sample {
   responseHeaders?: HeaderEntry[];
   /** ISO 8601 timestamp of when this sample was captured */
   capturedAt: string;
+  /** JSON-RPC method name (e.g., "tools/call", "initialize") — only for JSON-RPC traffic */
+  jsonrpcMethod?: string;
+  /** JSON-RPC tool name (e.g., "cp_create_cluster") — only for tools/call requests */
+  jsonrpcTool?: string;
 }
 
 /** A captured HTTP header with name and example value */

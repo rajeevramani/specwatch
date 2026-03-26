@@ -22,6 +22,8 @@ interface SampleRow {
   request_headers: string | null;
   response_headers: string | null;
   captured_at: string;
+  jsonrpc_method: string | null;
+  jsonrpc_tool: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +55,8 @@ function rowToSample(row: SampleRow): Sample {
       ? (JSON.parse(row.response_headers) as HeaderEntry[])
       : undefined,
     capturedAt: row.captured_at,
+    jsonrpcMethod: row.jsonrpc_method ?? undefined,
+    jsonrpcTool: row.jsonrpc_tool ?? undefined,
   };
 }
 
@@ -80,9 +84,10 @@ export class SampleRepository {
         `INSERT INTO samples
            (session_id, http_method, path, normalized_path, status_code,
             query_params, request_schema, response_schema,
-            request_headers, response_headers, captured_at)
+            request_headers, response_headers, captured_at,
+            jsonrpc_method, jsonrpc_tool)
          VALUES
-           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         sample.sessionId,
@@ -96,6 +101,8 @@ export class SampleRepository {
         sample.requestHeaders != null ? JSON.stringify(sample.requestHeaders) : null,
         sample.responseHeaders != null ? JSON.stringify(sample.responseHeaders) : null,
         sample.capturedAt,
+        sample.jsonrpcMethod ?? null,
+        sample.jsonrpcTool ?? null,
       );
 
     return result.lastInsertRowid as number;
@@ -125,6 +132,21 @@ export class SampleRepository {
          ORDER BY captured_at ASC`,
       )
       .all(sessionId, method, normalizedPath) as SampleRow[];
+
+    return rows.map(rowToSample);
+  }
+
+  /**
+   * Returns all samples for a specific JSON-RPC method within a session.
+   */
+  listByJsonRpcMethod(sessionId: string, jsonrpcMethod: string): Sample[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM samples
+         WHERE session_id = ? AND jsonrpc_method = ?
+         ORDER BY captured_at ASC`,
+      )
+      .all(sessionId, jsonrpcMethod) as SampleRow[];
 
     return rows.map(rowToSample);
   }

@@ -444,6 +444,87 @@ describe('countBySession', () => {
 });
 
 // ---------------------------------------------------------------------------
+// listByJsonRpcMethod
+// ---------------------------------------------------------------------------
+
+describe('listByJsonRpcMethod', () => {
+  it('returns empty array when no matching samples', () => {
+    expect(samples.listByJsonRpcMethod(sessionId, 'tools/list')).toEqual([]);
+  });
+
+  it('returns only samples matching the jsonrpc_method', () => {
+    const now = new Date().toISOString();
+    samples.insertSample({
+      sessionId,
+      httpMethod: 'POST',
+      path: '/mcp',
+      normalizedPath: '/mcp',
+      jsonrpcMethod: 'tools/list',
+      capturedAt: now,
+    });
+    samples.insertSample({
+      sessionId,
+      httpMethod: 'POST',
+      path: '/mcp',
+      normalizedPath: '/mcp',
+      jsonrpcMethod: 'tools/call',
+      capturedAt: now,
+    });
+    samples.insertSample({
+      sessionId,
+      httpMethod: 'POST',
+      path: '/mcp',
+      normalizedPath: '/mcp',
+      jsonrpcMethod: 'tools/list',
+      capturedAt: now,
+    });
+
+    const result = samples.listByJsonRpcMethod(sessionId, 'tools/list');
+    expect(result).toHaveLength(2);
+    result.forEach((s) => {
+      expect(s.jsonrpcMethod).toBe('tools/list');
+    });
+  });
+
+  it('excludes samples from other sessions', () => {
+    const otherId = sessions.createSession('https://other.example.com', 9090).id;
+    const now = new Date().toISOString();
+    samples.insertSample({
+      sessionId: otherId,
+      httpMethod: 'POST',
+      path: '/mcp',
+      normalizedPath: '/mcp',
+      jsonrpcMethod: 'tools/list',
+      capturedAt: now,
+    });
+    expect(samples.listByJsonRpcMethod(sessionId, 'tools/list')).toHaveLength(0);
+  });
+
+  it('returns samples ordered by captured_at ascending', () => {
+    samples.insertSample({
+      sessionId,
+      httpMethod: 'POST',
+      path: '/mcp',
+      normalizedPath: '/mcp',
+      jsonrpcMethod: 'tools/call',
+      capturedAt: '2026-01-01T10:00:00.000Z',
+    });
+    samples.insertSample({
+      sessionId,
+      httpMethod: 'POST',
+      path: '/mcp',
+      normalizedPath: '/mcp',
+      jsonrpcMethod: 'tools/call',
+      capturedAt: '2026-01-01T09:00:00.000Z',
+    });
+
+    const result = samples.listByJsonRpcMethod(sessionId, 'tools/call');
+    expect(result[0].capturedAt).toBe('2026-01-01T09:00:00.000Z');
+    expect(result[1].capturedAt).toBe('2026-01-01T10:00:00.000Z');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Cascade delete
 // ---------------------------------------------------------------------------
 

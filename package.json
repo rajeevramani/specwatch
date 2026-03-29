@@ -1,6 +1,6 @@
 {
   "name": "specwatch",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Zero-infrastructure developer tool that learns API schemas from live traffic and generates OpenAPI specs",
   "type": "module",
   "bin": {

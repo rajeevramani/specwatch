@@ -195,13 +195,13 @@ function generateExplanation(
   }
 }
 
-function generateRecommendation(
+function recommendationForCause(
   cause: RedundantCause,
-  pairAnalyses: PairAnalysis[],
+  pairs: PairAnalysis[],
 ): string {
   switch (cause) {
     case 'identical_response': {
-      const hasWrites = pairAnalyses.some((p) =>
+      const hasWrites = pairs.some((p) =>
         p.interveningOps.some((op) =>
           /create|update|set|put|patch|add|insert|delete|remove|register|configure/i.test(op),
         ),
@@ -224,6 +224,30 @@ function generateRecommendation(
     default:
       return 'Review the call pattern manually for optimization opportunities.';
   }
+}
+
+function generateRecommendation(
+  _primaryCause: RedundantCause,
+  pairAnalyses: PairAnalysis[],
+): string {
+  // Collect distinct causes across all pairs, preserving order of first appearance
+  const seenCauses = new Set<RedundantCause>();
+  const orderedCauses: RedundantCause[] = [];
+  for (const pair of pairAnalyses) {
+    if (!seenCauses.has(pair.cause)) {
+      seenCauses.add(pair.cause);
+      orderedCauses.push(pair.cause);
+    }
+  }
+
+  // Generate a recommendation for each distinct cause, using only the pairs that match
+  const recommendations: string[] = [];
+  for (const cause of orderedCauses) {
+    const causePairs = pairAnalyses.filter((p) => p.cause === cause);
+    recommendations.push(recommendationForCause(cause, causePairs));
+  }
+
+  return recommendations.join(' ');
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/com
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
 import { extractJsonRpcFromBody, isJsonRpcSession, unwrapMcpResponse } from '../analysis/jsonrpc.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
+import { discoverDomainModels } from '../export/domain-models.js';
 import {
   info,
   success,
@@ -608,7 +609,8 @@ export function createProgram(): Command {
             }
           }
 
-          let doc = buildOpenApiDocument(filtered, exportOptions, agentExtensionsMap);
+          const domainModels = discoverDomainModels(filtered);
+          let doc = buildOpenApiDocument(filtered, exportOptions, agentExtensionsMap, domainModels);
           const openapiVersion = opts['openapiVersion'] as string | undefined;
           if (openapiVersion === '3.0') {
             doc = convertToOpenApi30(doc);

@@ -4,6 +4,7 @@
 [![npm version](https://img.shields.io/npm/v/specwatch.svg)](https://www.npmjs.com/package/specwatch)
 [![Node.js](https://img.shields.io/node/v/specwatch.svg)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rajeevramani/specwatch)
 
 **Specwatch does two things:**
 

@@ -112,9 +112,9 @@ describe('convertSchemaToOpenApi', () => {
     expect(result).toEqual({ type: 'boolean' });
   });
 
-  it('converts null type to empty schema (avoids validator errors)', () => {
+  it('converts null type to OAS 3.1 type: null (honest about nullability)', () => {
     const result = convertSchemaToOpenApi(makeNullSchema());
-    expect(result).toEqual({});
+    expect(result).toEqual({ type: 'null' });
   });
 
   it('includes format for string with format', () => {
@@ -179,31 +179,31 @@ describe('convertSchemaToOpenApi', () => {
     expect(result).toEqual({ type: 'array' });
   });
 
-  it('converts oneOf with null variant to inlined non-null schema', () => {
+  it('converts oneOf with null variant to nullable type array (OAS 3.1)', () => {
     const schema = makeOneOfSchema(makeStringSchema(), makeNullSchema());
     const result = convertSchemaToOpenApi(schema);
-    // oneOf [string, null] collapses to just { type: 'string' }
-    expect(result).toEqual({ type: 'string' });
+    // OAS 3.1 type array preserves nullability — was previously dropping null
+    expect(result).toEqual({ type: ['string', 'null'] });
   });
 
-  it('converts oneOf with nested object and null to inlined object', () => {
+  it('converts oneOf with nested object and null to nullable object (OAS 3.1)', () => {
     const schema = makeOneOfSchema(
       makeObjectSchema({ id: makeIntegerSchema() }, ['id']),
       makeNullSchema(),
     );
     const result = convertSchemaToOpenApi(schema);
-    // oneOf [object, null] collapses to just the object
-    expect(result['type']).toBe('object');
+    expect(result['type']).toEqual(['object', 'null']);
     expect(result['properties']).toBeDefined();
   });
 
-  it('keeps oneOf when multiple non-null variants exist', () => {
+  it('keeps oneOf with null branch when multiple non-null variants exist', () => {
     const schema = makeOneOfSchema(makeStringSchema(), makeIntegerSchema(), makeNullSchema());
     const result = convertSchemaToOpenApi(schema);
     const oneOf = result['oneOf'] as Record<string, unknown>[];
-    expect(oneOf).toHaveLength(2);
+    expect(oneOf).toHaveLength(3);
     expect(oneOf[0]).toEqual({ type: 'string' });
     expect(oneOf[1]).toEqual({ type: 'integer' });
+    expect(oneOf[2]).toEqual({ type: 'null' });
   });
 
   it('strips stats from output', () => {
@@ -432,6 +432,20 @@ describe('buildOperationObject', () => {
     const response204 = responses['204'] as Record<string, unknown>;
     expect(response204['description']).toBe('No Content');
     expect(response204['content']).toBeUndefined();
+  });
+
+  it('preserves status code with null sentinel (no body observed)', () => {
+    // Pipeline emits null when a status code was observed but the response had
+    // no body (e.g. 204). Export must keep the status code, not coerce to 200.
+    const schema = makeAggregatedSchema({
+      responseSchemas: {
+        '204': null,
+      },
+    });
+    const op = buildOperationObject(schema);
+    const responses = op['responses'] as Record<string, unknown>;
+    expect(responses['204']).toEqual({ description: 'No Content' });
+    expect(responses['200']).toBeUndefined();
   });
 
   it('includes header parameters from requestHeaders (excluding auth and transport headers)', () => {

@@ -53,7 +53,7 @@ function rowToAggregatedSchema(row: AggregatedSchemaRow): AggregatedSchema {
       ? (JSON.parse(row.request_schema) as InferredSchema)
       : undefined,
     responseSchemas: row.response_schemas
-      ? (JSON.parse(row.response_schemas) as Record<string, InferredSchema>)
+      ? (JSON.parse(row.response_schemas) as Record<string, InferredSchema | null>)
       : undefined,
     requestHeaders: row.request_headers
       ? (JSON.parse(row.request_headers) as HeaderEntry[])

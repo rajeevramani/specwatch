@@ -27,6 +27,20 @@ export interface DomainModelUsage {
   statusCode?: string;
   /** Whether the schema appeared as array items (the endpoint returns an array of this model) */
   isArrayItem: boolean;
+  /**
+   * True when the schema was found nested inside a parent object's properties
+   * (e.g. `Order.user`) rather than as the top-level response/request body. The
+   * name picker uses this to prefer usages where the schema *is* the body —
+   * those are the canonical home of the entity.
+   */
+  isNested?: boolean;
+  /**
+   * For nested usages, the parent property name where this schema lives
+   * (e.g. `tags` for the inner `{name, color}` shape inside `Pet.tags.items`).
+   * The name picker prefers field-name-derived names over path-derived names
+   * for nested-only schemas — gets `Tag` instead of suffix-collided `Pet2`.
+   */
+  fieldName?: string;
 }
 
 /** A discovered domain model — a schema shared across multiple endpoints */
@@ -93,26 +107,135 @@ function deriveModelName(path: string): string {
 }
 
 /**
- * Choose the best model name from all usages. Prefer names from:
- * 1. Single-resource GET endpoints (GET /users/{id} → "User")
- * 2. Collection endpoints (GET /users → "User")
- * 3. Any other usage
+ * Detect whether a schema is a recognizable structural shape (error, list
+ * wrapper, etc.) and return an appropriate name. Returns undefined when the
+ * schema does not match any known shape — fall back to path-derived naming.
+ *
+ * This exists because path-based naming gave wrong results (e.g. naming a
+ * `{error, message}` 404 response after a domain entity like "User"). Content
+ * is the source of truth for what a shape *means*.
  */
-function chooseBestName(usages: DomainModelUsage[]): string {
+function detectShapeKind(schema: InferredSchema): string | undefined {
+  if (schema.type !== 'object' || schema.properties === undefined) return undefined;
+  const keys = Object.keys(schema.properties);
+  const keySet = new Set(keys);
+
+  // Validation error: { error, details: array }
+  if (
+    keySet.has('error') &&
+    keySet.has('details') &&
+    schema.properties['details']?.type === 'array'
+  ) {
+    return 'ValidationError';
+  }
+  // Generic error response: { error, message } (with at most a couple extra fields)
+  if (keySet.has('error') && keySet.has('message') && keys.length <= 4) {
+    return 'ErrorResponse';
+  }
+  // Message-only error: { message }
+  if (keys.length === 1 && keySet.has('message')) {
+    return 'MessageResponse';
+  }
+  // Paginated list wrapper: { data: array, ...pagination } — pagination keys
+  // are total/page/limit/hasMore/count/cursor/nextPage. We do not name it after
+  // the inner entity because the wrapper itself is the shared shape, and the
+  // items will be hoisted as their own domain model.
+  const PAGINATION_KEYS = new Set([
+    'total',
+    'page',
+    'limit',
+    'hasMore',
+    'has_more',
+    'count',
+    'cursor',
+    'nextPage',
+    'next_page',
+    'pageSize',
+    'page_size',
+  ]);
+  if (keySet.has('data') && schema.properties['data']?.type === 'array') {
+    const otherKeys = keys.filter((k) => k !== 'data');
+    if (otherKeys.length > 0 && otherKeys.every((k) => PAGINATION_KEYS.has(k))) {
+      return 'ListResponse';
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Choose the best model name from all usages.
+ *
+ * Strategy:
+ *   1. Detect well-known shapes (error, list wrapper) by content — this prevents
+ *      naming an error shape after a domain entity, which was the worst class of
+ *      mislabel pre-fix.
+ *   2. Restrict path-derived naming to successful (2xx) response usages so the
+ *      name reflects what the shape *means in success*, not where its first
+ *      error happened to be observed.
+ *   3. Within the eligible usages, prefer single-resource GETs, then collection
+ *      GETs, then any other usage.
+ */
+function chooseBestName(usages: DomainModelUsage[], schema: InferredSchema): string {
+  // Content-based name override for well-known shapes
+  const shapeKind = detectShapeKind(schema);
+  if (shapeKind !== undefined) return shapeKind;
+
+  // Path naming should reflect the success-path meaning of this shape.
+  // Filter out 4xx/5xx response usages; if nothing remains, fall back to all usages
+  // (e.g. for shapes that only ever appeared on error responses).
+  const successUsages = usages.filter((u) => {
+    if (u.role !== 'response') return true;
+    if (u.statusCode === undefined) return true;
+    return u.statusCode.startsWith('2');
+  });
+  let pool = successUsages.length > 0 ? successUsages : usages;
+
+  // Prefer usages where this schema IS the body, not where it's embedded inside
+  // a parent. /v1/users/{id} returning User is a stronger naming signal than
+  // /v1/orders/{id} embedding `user: User`.
+  const topLevelUsages = pool.filter((u) => u.isNested !== true);
+  if (topLevelUsages.length > 0) {
+    pool = topLevelUsages;
+  } else {
+    // Pure-nested shape: prefer the field name where it lives. Tag (from
+    // `tags`), Address (from `address`), etc. — much better than colliding
+    // with the parent schema name and getting `Pet2`.
+    const fieldNames = new Set(pool.map((u) => u.fieldName).filter((f): f is string => !!f));
+    if (fieldNames.size === 1) {
+      const [field] = [...fieldNames];
+      const fromField = singularizeFieldName(field);
+      if (fromField !== undefined) return fromField;
+    }
+  }
+
   // Prefer single-resource GET (path ends with a parameter)
-  const singleResource = usages.find(
+  const singleResource = pool.find(
     (u) => u.httpMethod === 'GET' && u.path.match(/\/\{[^}]+\}$/),
   );
   if (singleResource) return deriveModelName(singleResource.path);
 
   // Then collection GET
-  const collection = usages.find(
-    (u) => u.httpMethod === 'GET' && u.isArrayItem,
-  );
+  const collection = pool.find((u) => u.httpMethod === 'GET' && u.isArrayItem);
   if (collection) return deriveModelName(collection.path);
 
-  // Fall back to first usage
-  return deriveModelName(usages[0].path);
+  // Fall back to first usage in the pool
+  return deriveModelName(pool[0].path);
+}
+
+/**
+ * PascalCase + singularize a field name. Returns undefined if the field name
+ * is too short or doesn't yield a meaningful identifier name.
+ */
+function singularizeFieldName(field: string): string | undefined {
+  if (field.length < 2) return undefined;
+  const pascal = field.charAt(0).toUpperCase() + field.slice(1);
+  if (pascal.endsWith('ies') && pascal.length > 3) return pascal.slice(0, -3) + 'y';
+  if (pascal.endsWith('ses') || pascal.endsWith('xes') || pascal.endsWith('zes')) {
+    return pascal.slice(0, -2);
+  }
+  if (pascal.endsWith('s') && !pascal.endsWith('ss')) return pascal.slice(0, -1);
+  return pascal;
 }
 
 // ============================================================
@@ -195,9 +318,9 @@ export function discoverDomainModels(schemas: AggregatedSchema[]): DomainModelRe
     schema: InferredSchema,
     usage: DomainModelUsage,
   ): void {
-    // Only consider object schemas as domain models
+    // Only consider object schemas with ≥2 properties as domain models. Tiny
+    // shapes (≤1 property) and primitives are not meaningful candidates.
     if (schema.type !== 'object') return;
-    // Must have properties to be meaningful
     if (schema.properties === undefined || Object.keys(schema.properties).length < 2) return;
 
     const fingerprint = computeSchemaFingerprint(schema);
@@ -206,6 +329,48 @@ export function discoverDomainModels(schemas: AggregatedSchema[]): DomainModelRe
       existing.usages.push(usage);
     } else {
       candidates.set(fingerprint, { schema, usages: [usage] });
+    }
+  }
+
+  // Recursively walk a schema and call trackSchema on every object subtree we
+  // encounter. This is what enables embedded entities (User inside Order.user,
+  // User inside ListResponse.data[]) to be discovered and promoted to domain
+  // models — without it, only top-level schemas qualify.
+  //
+  // The `depth` parameter tracks how far inside the parent body we are: depth 0
+  // is the top-level body itself, depth ≥1 marks the schema as nested. The name
+  // picker uses this to prefer top-level usages when choosing a model name.
+  //
+  // `fieldName` is the parent property name at the nesting site, used by the
+  // name picker for nested-only shapes (e.g. tag-inner-object → `Tag`).
+  function walkAndTrack(
+    schema: InferredSchema,
+    usage: DomainModelUsage,
+    depth: number,
+    fieldName?: string,
+  ): void {
+    if (schema.type === 'object' && schema.properties !== undefined) {
+      const positionedUsage: DomainModelUsage =
+        depth === 0 ? usage : { ...usage, isNested: true, fieldName };
+      trackSchema(schema, positionedUsage);
+      for (const [key, propSchema] of Object.entries(schema.properties)) {
+        walkAndTrack(propSchema, usage, depth + 1, key);
+      }
+      return;
+    }
+    if (schema.type === 'array' && schema.items !== undefined) {
+      // Array items inherit the parent's usage but are flagged as array items —
+      // the resolver uses this to decide whether to emit an array wrapper $ref.
+      // Top-level arrays (depth 0) keep their items as still-top-level for
+      // naming purposes. Field name flows through unchanged so a `tags` array
+      // exposes its item shape as `Tag`.
+      walkAndTrack(schema.items, { ...usage, isArrayItem: true }, depth, fieldName);
+      return;
+    }
+    if (schema.oneOf !== undefined) {
+      for (const variant of schema.oneOf) {
+        walkAndTrack(variant, usage, depth, fieldName);
+      }
     }
   }
 
@@ -218,17 +383,15 @@ export function discoverDomainModels(schemas: AggregatedSchema[]): DomainModelRe
         role: 'request',
         isArrayItem: false,
       };
-
-      if (aggSchema.requestSchema.type === 'array' && aggSchema.requestSchema.items !== undefined) {
-        trackSchema(aggSchema.requestSchema.items, { ...usage, isArrayItem: true });
-      } else {
-        trackSchema(aggSchema.requestSchema, usage);
-      }
+      walkAndTrack(aggSchema.requestSchema, usage, 0);
     }
 
     // Track response schemas (per status code)
     if (aggSchema.responseSchemas !== undefined) {
       for (const [statusCode, responseSchema] of Object.entries(aggSchema.responseSchemas)) {
+        // Skip status codes with no body (null sentinel for 204, 304, etc.)
+        if (responseSchema === null) continue;
+
         const usage: DomainModelUsage = {
           httpMethod: aggSchema.httpMethod,
           path: aggSchema.path,
@@ -236,12 +399,7 @@ export function discoverDomainModels(schemas: AggregatedSchema[]): DomainModelRe
           statusCode,
           isArrayItem: false,
         };
-
-        if (responseSchema.type === 'array' && responseSchema.items !== undefined) {
-          trackSchema(responseSchema.items, { ...usage, isArrayItem: true });
-        } else {
-          trackSchema(responseSchema, usage);
-        }
+        walkAndTrack(responseSchema, usage, 0);
       }
     }
   }
@@ -254,7 +412,7 @@ export function discoverDomainModels(schemas: AggregatedSchema[]): DomainModelRe
     const distinctEndpoints = new Set(usages.map((u) => `${u.httpMethod} ${u.path}`));
     if (distinctEndpoints.size < 2) continue;
 
-    let name = chooseBestName(usages);
+    let name = chooseBestName(usages, schema);
 
     // Handle name collisions
     if (usedNames.has(name)) {

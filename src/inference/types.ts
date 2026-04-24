@@ -149,8 +149,12 @@ export interface AggregatedSchema {
   snapshot: number;
   /** Merged request body schema */
   requestSchema?: InferredSchema;
-  /** Response schemas keyed by status code (e.g., {"200": {...}, "404": {...}}) */
-  responseSchemas?: Record<string, InferredSchema>;
+  /**
+   * Response schemas keyed by status code (e.g., {"200": {...}, "404": {...}}).
+   * A `null` value indicates the status code was observed but the response had
+   * no body (e.g. `204 No Content`).
+   */
+  responseSchemas?: Record<string, InferredSchema | null>;
   /** Merged request headers */
   requestHeaders?: HeaderEntry[];
   /** Merged response headers */
@@ -225,4 +229,6 @@ export interface ExportOptions {
   description?: string;
   /** Include x-specwatch-* metadata extensions */
   includeMetadata?: boolean;
+  /** Server URLs for the OpenAPI servers block (typically the proxied target URL) */
+  servers?: string[];
 }

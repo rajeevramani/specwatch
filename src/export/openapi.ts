@@ -194,31 +194,58 @@ const TRANSPORT_HEADERS = new Set([
  * @param schema - The inferred schema to convert
  * @returns Plain object suitable for inclusion in OpenAPI spec
  */
-export function convertSchemaToOpenApi(schema: InferredSchema): Record<string, unknown> {
-  // Handle oneOf union types
-  if (schema.oneOf !== undefined) {
-    // Separate null variants from non-null variants
-    const nonNullVariants = schema.oneOf.filter((v) => v.type !== 'null');
-
-    // If only null variants, return empty schema
-    if (nonNullVariants.length === 0) {
-      return {};
-    }
-
-    // If one non-null variant remains, inline it (no oneOf wrapper needed)
-    if (nonNullVariants.length === 1) {
-      return convertSchemaToOpenApi(nonNullVariants[0]);
-    }
-
-    // Multiple non-null variants: keep oneOf
-    return {
-      oneOf: nonNullVariants.map((variant) => convertSchemaToOpenApi(variant)),
-    };
+export function convertSchemaToOpenApi(
+  schema: InferredSchema,
+  collector?: SchemaCollector,
+): Record<string, unknown> {
+  // Domain model lookup: if this subtree (or its array items) matches a known
+  // domain model, replace it with a $ref. Done at every nesting depth so that
+  // entities embedded in arrays, list wrappers, or other objects all dedup.
+  if (collector !== undefined) {
+    const match = collector.resolveWithDomainModel(schema);
+    if (match !== undefined) return match;
   }
 
-  // Skip null type — not a valid standalone type in most OpenAPI validators
+  // Handle oneOf union types
+  if (schema.oneOf !== undefined) {
+    // Separate null variants from non-null variants. The presence of null in
+    // the oneOf means the field is nullable — we must surface this in the
+    // output so generated clients handle null correctly.
+    const nonNullVariants = schema.oneOf.filter((v) => v.type !== 'null');
+    const hasNull = schema.oneOf.some((v) => v.type === 'null');
+
+    // If only null variants, the field was always null in observed samples.
+    // Use OAS 3.1 type: 'null' so the spec is explicit instead of opaque.
+    if (nonNullVariants.length === 0) {
+      return hasNull ? { type: 'null' } : {};
+    }
+
+    // If one non-null variant remains, inline it. Promote nullability into the
+    // type field as a JSON Schema 2020-12 type array (`type: ['string', 'null']`).
+    // The OAS 3.0 converter downgrades this to `type + nullable: true`.
+    if (nonNullVariants.length === 1) {
+      const inlined = convertSchemaToOpenApi(nonNullVariants[0], collector);
+      if (hasNull && typeof inlined['type'] === 'string') {
+        return { ...inlined, type: [inlined['type'] as string, 'null'] };
+      }
+      return inlined;
+    }
+
+    // Multiple non-null variants: keep oneOf, append a null branch if observed.
+    const variants: Array<Record<string, unknown>> = nonNullVariants.map((variant) =>
+      convertSchemaToOpenApi(variant, collector),
+    );
+    if (hasNull) {
+      variants.push({ type: 'null' });
+    }
+    return { oneOf: variants };
+  }
+
+  // Standalone null type. OAS 3.1 supports `type: 'null'` directly; the 3.0
+  // converter downgrades this to `nullable: true` (with no other type, since
+  // we only ever observed null). Either is more honest than emitting {}.
   if (schema.type === 'null') {
-    return {};
+    return { type: 'null' };
   }
 
   const result: Record<string, unknown> = { type: schema.type };
@@ -238,7 +265,7 @@ export function convertSchemaToOpenApi(schema: InferredSchema): Record<string, u
     if (schema.properties !== undefined && Object.keys(schema.properties).length > 0) {
       const properties: Record<string, unknown> = {};
       for (const [key, propSchema] of Object.entries(schema.properties)) {
-        properties[key] = convertSchemaToOpenApi(propSchema);
+        properties[key] = convertSchemaToOpenApi(propSchema, collector);
       }
       result['properties'] = properties;
     }
@@ -250,7 +277,7 @@ export function convertSchemaToOpenApi(schema: InferredSchema): Record<string, u
 
   // Handle array type
   if (schema.type === 'array' && schema.items !== undefined) {
-    result['items'] = convertSchemaToOpenApi(schema.items);
+    result['items'] = convertSchemaToOpenApi(schema.items, collector);
   }
 
   return result;
@@ -476,17 +503,22 @@ export function buildOperationObject(
     operation['parameters'] = parameters;
   }
 
-  // Request body
+  // Request body. Pass the collector so embedded entities at any depth dedup.
   if (schema.requestSchema !== undefined) {
-    const requestBodySchema = convertSchemaToOpenApi(schema.requestSchema);
+    const requestBodySchema = convertSchemaToOpenApi(schema.requestSchema, collector);
     if (collector !== undefined) {
-      // Try domain model resolution first
-      const domainResolved = collector.resolveWithDomainModel(schema.requestSchema);
-      if (domainResolved !== undefined) {
+      // The converter already returned a $ref if the top-level matched a domain
+      // model (directly or as an array-of). Otherwise register the inline shape
+      // under the auto-generated name.
+      const isAlreadyRef =
+        typeof requestBodySchema['$ref'] === 'string' ||
+        (requestBodySchema['type'] === 'array' &&
+          typeof (requestBodySchema['items'] as Record<string, unknown> | undefined)?.['$ref'] === 'string');
+      if (isAlreadyRef) {
         operation['requestBody'] = {
           content: {
             'application/json': {
-              schema: domainResolved,
+              schema: requestBodySchema,
             },
           },
         };
@@ -518,6 +550,11 @@ export function buildOperationObject(
   if (schema.responseSchemas !== undefined) {
     for (const [statusCode, responseSchema] of Object.entries(schema.responseSchemas)) {
       const statusNum = parseInt(statusCode, 10);
+      // null sentinel = status code observed but response had no body (204, 304, etc.)
+      if (responseSchema === null) {
+        responses[statusCode] = { description: getStatusCodeDescription(statusNum) };
+        continue;
+      }
       responses[statusCode] = buildResponseObject(
         statusNum,
         responseSchema,
@@ -573,17 +610,18 @@ function buildResponseObject(
     return { description };
   }
 
-  const openApiSchema = convertSchemaToOpenApi(responseSchema);
+  // Pass the collector so embedded entities at any depth dedup.
+  const openApiSchema = convertSchemaToOpenApi(responseSchema, collector);
 
   if (collector !== undefined && httpMethod !== undefined && path !== undefined) {
-    // Try domain model resolution first
-    const domainResolved = collector.resolveWithDomainModel(responseSchema);
-    if (domainResolved !== undefined) {
+    // The converter already returns a $ref for direct domain matches when given
+    // the collector. If the top-level result is itself a $ref, just wrap it.
+    if (typeof openApiSchema['$ref'] === 'string' || (openApiSchema['type'] === 'array' && (openApiSchema['items'] as Record<string, unknown> | undefined)?.['$ref'])) {
       return {
         description,
         content: {
           'application/json': {
-            schema: domainResolved,
+            schema: openApiSchema,
           },
         },
       };
@@ -807,6 +845,10 @@ export function buildOpenApiDocument(
     paths,
   };
 
+  if (options.servers !== undefined && options.servers.length > 0) {
+    doc['servers'] = options.servers.map((url) => ({ url }));
+  }
+
   // Build components object
   const components: Record<string, unknown> = {};
 
@@ -860,6 +902,11 @@ function convertSchemaTo30(schema: Record<string, unknown>): Record<string, unkn
         result['nullable'] = true;
       }
       result['type'] = nonNull.length === 1 ? nonNull[0] : nonNull[0] ?? 'string';
+    } else if (key === 'type' && value === 'null') {
+      // OAS 3.0 has no standalone null type — fall back to nullable string,
+      // which is the closest valid representation when only null was observed.
+      result['type'] = 'string';
+      result['nullable'] = true;
     } else if (key === 'oneOf' && Array.isArray(value)) {
       result['oneOf'] = value.map((v) =>
         typeof v === 'object' && v !== null ? convertSchemaTo30(v as Record<string, unknown>) : v,

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { groupSamples, mergeGroupSchemas, calculateRequiredFields, mergeHeaders, mergeQueryParams, collectPathParamValues, inferEnums, computeSchemaFingerprint, countUniqueResponseShapes } from './pipeline.js';
+import { groupSamples, mergeGroupSchemas, calculateRequiredFields, mergeHeaders, mergeQueryParams, collectPathParamValues, inferEnums, computeSchemaFingerprint, countUniqueResponseShapes, unifyEndpointPaths } from './pipeline.js';
 import type { Sample, InferredSchema, HeaderEntry } from '../types/index.js';
 
 // ============================================================
@@ -664,6 +664,94 @@ describe('inferEnums', () => {
     expect(result._observedValues).toBeUndefined();
     expect(result.enum).toBeUndefined();
   });
+
+  it('does not promote when values look like UUIDs', () => {
+    const schema = makeObjectSchema({
+      orderId: {
+        type: 'string',
+        _observedValues: [
+          'ord-169a1ddb-e73e-4fa1-9420-1ce7cd81a939',
+          'ord-1983e33e-11e2-4c84-919a-db51972a01b4',
+          'ord-f42c2b22-988b-43bb-bd5c-77786ef8a22a',
+        ],
+        stats: makeStats(15, 15),
+      },
+    });
+    const result = inferEnums(schema, 15);
+    expect(result.properties?.orderId.enum).toBeUndefined();
+  });
+
+  it('does not promote string values containing whitespace (free text)', () => {
+    const schema = makeObjectSchema({
+      bio: {
+        type: 'string',
+        _observedValues: ['admin user', 'hello world'],
+        stats: makeStats(15, 15),
+      },
+    });
+    const result = inferEnums(schema, 15);
+    expect(result.properties?.bio.enum).toBeUndefined();
+  });
+
+  it('does not promote semver-like values', () => {
+    const schema = makeObjectSchema({
+      version: {
+        type: 'string',
+        _observedValues: ['1.4.2'],
+        stats: makeStats(15, 15),
+      },
+    });
+    const result = inferEnums(schema, 15);
+    expect(result.properties?.version.enum).toBeUndefined();
+  });
+
+  it('does not promote when field name looks like an identifier (sku)', () => {
+    const schema = makeObjectSchema({
+      sku: {
+        type: 'string',
+        _observedValues: ['SKU-A', 'SKU-B', 'SKU-C', 'SKU-D'],
+        stats: makeStats(15, 15),
+      },
+    });
+    const result = inferEnums(schema, 15);
+    expect(result.properties?.sku.enum).toBeUndefined();
+  });
+
+  it('does not promote when field name is "name" (treats as human name)', () => {
+    const schema = makeObjectSchema({
+      name: {
+        type: 'string',
+        _observedValues: ['Alice', 'Bob', 'Carol'],
+        stats: makeStats(15, 15),
+      },
+    });
+    const result = inferEnums(schema, 15);
+    expect(result.properties?.name.enum).toBeUndefined();
+  });
+
+  it('still promotes legitimate enums (status, role, currency) despite tightened heuristic', () => {
+    const schema = makeObjectSchema({
+      status: {
+        type: 'string',
+        _observedValues: ['active', 'inactive', 'pending'],
+        stats: makeStats(15, 15),
+      },
+      role: {
+        type: 'string',
+        _observedValues: ['admin', 'user', 'guest'],
+        stats: makeStats(15, 15),
+      },
+      currency: {
+        type: 'string',
+        _observedValues: ['USD', 'EUR', 'GBP'],
+        stats: makeStats(15, 15),
+      },
+    });
+    const result = inferEnums(schema, 15);
+    expect(result.properties?.status.enum).toEqual(['active', 'inactive', 'pending']);
+    expect(result.properties?.role.enum).toEqual(['admin', 'guest', 'user']);
+    expect(result.properties?.currency.enum).toEqual(['EUR', 'GBP', 'USD']);
+  });
 });
 
 // ============================================================
@@ -759,5 +847,123 @@ describe('countUniqueResponseShapes', () => {
   it('returns 1 for single sample', () => {
     const samples = [makeSample({ responseSchema: makeStringSchema() })];
     expect(countUniqueResponseShapes(samples)).toBe(1);
+  });
+});
+
+// ============================================================
+// unifyEndpointPaths
+// ============================================================
+
+describe('unifyEndpointPaths', () => {
+  function makeEntry(
+    method: string,
+    path: string,
+    statusGroups: Record<string, { responseSchema?: InferredSchema; sampleCount?: number }>,
+  ) {
+    const sg = new Map<string, { requestSchema?: InferredSchema; responseSchema?: InferredSchema; samples: Sample[] }>();
+    const allSamples: Sample[] = [];
+    for (const [code, group] of Object.entries(statusGroups)) {
+      const samples: Sample[] = [];
+      for (let i = 0; i < (group.sampleCount ?? 1); i++) {
+        samples.push(makeSample({ httpMethod: method, path, normalizedPath: path, statusCode: parseInt(code, 10) }));
+      }
+      sg.set(code, { responseSchema: group.responseSchema, samples });
+      allSamples.push(...samples);
+    }
+    return {
+      method,
+      path,
+      statusGroups: sg,
+      allSamples,
+      requestHeaders: [],
+      responseHeaders: [],
+    };
+  }
+
+  it('unifies sibling literal paths sharing a 2xx response shape', () => {
+    const ownerShape = makeObjectSchema({ id: makeStringSchema(), name: makeStringSchema() });
+    const map = new Map<string, ReturnType<typeof makeEntry>>();
+    map.set('GET /owners/owner_alice', makeEntry('GET', '/owners/owner_alice', { '200': { responseSchema: ownerShape } }));
+    map.set('GET /owners/owner_bob', makeEntry('GET', '/owners/owner_bob', { '200': { responseSchema: ownerShape } }));
+
+    unifyEndpointPaths(map);
+
+    expect(map.has('GET /owners/owner_alice')).toBe(false);
+    expect(map.has('GET /owners/owner_bob')).toBe(false);
+    expect(map.has('GET /owners/{ownerId}')).toBe(true);
+  });
+
+  it('does not unify siblings with different 2xx shapes', () => {
+    const shapeA = makeObjectSchema({ id: makeStringSchema() });
+    const shapeB = makeObjectSchema({ id: makeStringSchema(), special: makeStringSchema() });
+    const map = new Map<string, ReturnType<typeof makeEntry>>();
+    map.set('GET /users/regular', makeEntry('GET', '/users/regular', { '200': { responseSchema: shapeA } }));
+    map.set('GET /users/admin', makeEntry('GET', '/users/admin', { '200': { responseSchema: shapeB } }));
+
+    unifyEndpointPaths(map);
+
+    expect(map.has('GET /users/regular')).toBe(true);
+    expect(map.has('GET /users/admin')).toBe(true);
+  });
+
+  it('folds error-only literal sibling into existing parameterized endpoint', () => {
+    const petShape = makeObjectSchema({ id: makeIntegerSchema(), name: makeStringSchema() });
+    const errShape = makeObjectSchema({ error: makeStringSchema(), message: makeStringSchema() });
+    const map = new Map<string, ReturnType<typeof makeEntry>>();
+    map.set('GET /pets/{petId}', makeEntry('GET', '/pets/{petId}', { '200': { responseSchema: petShape } }));
+    map.set('GET /pets/abc', makeEntry('GET', '/pets/abc', { '400': { responseSchema: errShape } }));
+
+    unifyEndpointPaths(map);
+
+    expect(map.has('GET /pets/abc')).toBe(false);
+    const merged = map.get('GET /pets/{petId}')!;
+    expect(merged.statusGroups.has('400')).toBe(true);
+    expect(merged.statusGroups.has('200')).toBe(true);
+  });
+
+  it('preserves literal sibling that has its own 2xx response', () => {
+    const petShape = makeObjectSchema({ id: makeIntegerSchema() });
+    const summaryShape = makeObjectSchema({ count: makeIntegerSchema(), kind: makeStringSchema() });
+    const map = new Map<string, ReturnType<typeof makeEntry>>();
+    map.set('GET /pets/{petId}', makeEntry('GET', '/pets/{petId}', { '200': { responseSchema: petShape } }));
+    // /pets/summary has its own legitimate 2xx shape — must NOT be folded
+    map.set('GET /pets/summary', makeEntry('GET', '/pets/summary', { '200': { responseSchema: summaryShape } }));
+
+    unifyEndpointPaths(map);
+
+    expect(map.has('GET /pets/summary')).toBe(true);
+    expect(map.has('GET /pets/{petId}')).toBe(true);
+  });
+});
+
+// ============================================================
+// inferEnums — query-param-style heuristics (x3n regression)
+// ============================================================
+
+describe('inferEnums (numeric and search-term heuristics)', () => {
+  function makeStringWithObserved(values: string[]): InferredSchema {
+    return {
+      type: 'string',
+      stats: makeStats(values.length, values.length),
+      _observedValues: values,
+    };
+  }
+
+  it('does not enum a `q` field even with low cardinality', () => {
+    const schema = makeObjectSchema({ q: makeStringWithObserved(['B', 'Rex']) });
+    const result = inferEnums(schema, 12);
+    expect(result.properties!.q.enum).toBeUndefined();
+  });
+
+  it('does not enum string values that all parse as numbers', () => {
+    const schema = makeObjectSchema({ minPrice: makeStringWithObserved(['10', '50']) });
+    const result = inferEnums(schema, 12);
+    expect(result.properties!.minPrice.enum).toBeUndefined();
+  });
+
+  it('still enums legitimate low-cardinality string fields', () => {
+    const schema = makeObjectSchema({ status: makeStringWithObserved(['active', 'pending', 'sold']) });
+    const result = inferEnums(schema, 30);
+    expect(result.properties!.status.enum).toEqual(['active', 'pending', 'sold']);
   });
 });

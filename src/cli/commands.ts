@@ -123,7 +123,7 @@ export function createProgram(): Command {
   program
     .name('specwatch')
     .description('Learn API schemas from live traffic and generate OpenAPI specs')
-    .version('0.3.2')
+    .version('0.3.3')
     .option('-v, --verbose', 'Enable verbose output')
     .option('-q, --quiet', 'Suppress non-essential output')
     .hook('preAction', (thisCommand) => {
@@ -581,16 +581,19 @@ export function createProgram(): Command {
           const exported = buildJsonExport(filtered);
           output = serializeJson(exported);
         } else {
-          // OpenAPI
+          // Look up the session — needed both for agent extensions and to seed
+          // the OpenAPI servers block from the proxied target URL.
+          const session = sessions.getSession(targetId);
+
           const exportOptions: Partial<ExportOptions> = {
             title: opts['title'] as string | undefined,
             version: opts['version'] as string | undefined,
             includeMetadata: opts['includeMetadata'] === true,
+            servers: session?.targetUrl ? [session.targetUrl] : undefined,
           };
 
           // Build agent extensions for agent sessions
           let agentExtensionsMap: Record<string, AgentExtension> | undefined;
-          const session = sessions.getSession(targetId);
           if (session?.consumer === 'agent') {
             const sequenceAnalysis = detectSequences(db, targetId);
             const sampleRepo = new SampleRepository(db);

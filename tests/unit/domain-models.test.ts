@@ -710,6 +710,243 @@ describe('discoverDomainModels', () => {
       expect(registry.models).toHaveLength(0);
     });
 
+    it('discovers entity embedded in another schema property (deep dedup)', () => {
+      // User appears top-level on /v1/users/{id} AND embedded as Order.user
+      // on /v1/orders/{id}. Discovery must walk into properties to find both.
+      const orderWithUser: InferredSchema = {
+        type: 'object',
+        properties: {
+          orderId: { type: 'string', stats: FIELD_STATS },
+          total: { type: 'number', stats: FIELD_STATS },
+          user: USER_SCHEMA,
+        },
+        required: ['orderId', 'total', 'user'],
+        stats: FIELD_STATS,
+      };
+      const schemas = [
+        makeAggregatedSchema({
+          httpMethod: 'GET',
+          path: '/v1/users/{userId}',
+          responseSchemas: { '200': USER_SCHEMA },
+        }),
+        makeAggregatedSchema({
+          id: 2,
+          httpMethod: 'GET',
+          path: '/v1/orders/{orderId}',
+          responseSchemas: { '200': orderWithUser },
+        }),
+      ];
+
+      const registry = discoverDomainModels(schemas);
+      const userModel = registry.models.find((m) => m.name === 'User');
+      expect(userModel).toBeDefined();
+      expect(userModel!.usages.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('discovers entity inside paginated list wrapper (data.items)', () => {
+      // User appears top-level on /v1/users/{id} AND inside data.items on
+      // /v1/users (list wrapper). Discovery must walk into arrays.
+      const listWrapper: InferredSchema = {
+        type: 'object',
+        properties: {
+          data: { type: 'array', items: USER_SCHEMA, stats: FIELD_STATS },
+          total: { type: 'integer', stats: FIELD_STATS },
+        },
+        required: ['data', 'total'],
+        stats: FIELD_STATS,
+      };
+      const schemas = [
+        makeAggregatedSchema({
+          httpMethod: 'GET',
+          path: '/v1/users/{userId}',
+          responseSchemas: { '200': USER_SCHEMA },
+        }),
+        makeAggregatedSchema({
+          id: 2,
+          httpMethod: 'GET',
+          path: '/v1/users',
+          responseSchemas: { '200': listWrapper },
+        }),
+      ];
+
+      const registry = discoverDomainModels(schemas);
+      const userModel = registry.models.find((m) => m.name === 'User');
+      expect(userModel).toBeDefined();
+    });
+
+    it('prefers top-level usage over embedded usage when picking entity name', () => {
+      // Same shape appears top-level on /v1/users/{id} (so should be named "User")
+      // and embedded as Order.user on /v1/orders/{id}. Without isNested
+      // tracking, we previously picked whichever endpoint came first in
+      // iteration order, sometimes naming User as "Order".
+      const orderWithUser: InferredSchema = {
+        type: 'object',
+        properties: {
+          orderId: { type: 'string', stats: FIELD_STATS },
+          total: { type: 'number', stats: FIELD_STATS },
+          user: USER_SCHEMA,
+        },
+        required: ['orderId', 'total', 'user'],
+        stats: FIELD_STATS,
+      };
+      const schemas = [
+        // Order endpoint first in array — used to bias naming toward "Order"
+        makeAggregatedSchema({
+          httpMethod: 'GET',
+          path: '/v1/orders/{orderId}',
+          responseSchemas: { '200': orderWithUser },
+        }),
+        makeAggregatedSchema({
+          id: 2,
+          httpMethod: 'GET',
+          path: '/v1/users/{userId}',
+          responseSchemas: { '200': USER_SCHEMA },
+        }),
+      ];
+
+      const registry = discoverDomainModels(schemas);
+      const userModel = registry.models.find((m) => m.name === 'User');
+      expect(userModel).toBeDefined();
+      // The embedded shape should not get named "Order"
+      expect(registry.models.find((m) => m.name === 'Order')).toBeUndefined();
+    });
+
+    it('names {error, message} shape as ErrorResponse, not after path entity', () => {
+      // Pre-fix bug: this got named "User" because the path heuristic looked at
+      // the first single-resource GET in the usages list — which happened to be
+      // /v1/users/{userId} on a 401 or 404 response.
+      const errorSchema: InferredSchema = {
+        type: 'object',
+        properties: {
+          error: { type: 'string', stats: FIELD_STATS },
+          message: { type: 'string', stats: FIELD_STATS },
+        },
+        required: ['error', 'message'],
+        stats: FIELD_STATS,
+      };
+      const schemas = [
+        makeAggregatedSchema({
+          httpMethod: 'GET',
+          path: '/users/{userId}',
+          responseSchemas: { '404': errorSchema },
+        }),
+        makeAggregatedSchema({
+          id: 2,
+          httpMethod: 'GET',
+          path: '/orders/{orderId}',
+          responseSchemas: { '404': errorSchema },
+        }),
+      ];
+
+      const registry = discoverDomainModels(schemas);
+      expect(registry.models).toHaveLength(1);
+      expect(registry.models[0].name).toBe('ErrorResponse');
+    });
+
+    it('names {error, details: array} shape as ValidationError', () => {
+      const validationError: InferredSchema = {
+        type: 'object',
+        properties: {
+          error: { type: 'string', stats: FIELD_STATS },
+          details: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                field: { type: 'string', stats: FIELD_STATS },
+                message: { type: 'string', stats: FIELD_STATS },
+              },
+              required: ['field', 'message'],
+              stats: FIELD_STATS,
+            },
+            stats: FIELD_STATS,
+          },
+        },
+        required: ['details', 'error'],
+        stats: FIELD_STATS,
+      };
+      const schemas = [
+        makeAggregatedSchema({
+          httpMethod: 'POST',
+          path: '/users',
+          responseSchemas: { '400': validationError },
+        }),
+        makeAggregatedSchema({
+          id: 2,
+          httpMethod: 'POST',
+          path: '/orders',
+          responseSchemas: { '400': validationError },
+        }),
+      ];
+
+      const registry = discoverDomainModels(schemas);
+      expect(registry.models[0].name).toBe('ValidationError');
+    });
+
+    it('names {data: array, total} list-wrapper as ListResponse, not after entity', () => {
+      const listWrapper: InferredSchema = {
+        type: 'object',
+        properties: {
+          data: {
+            type: 'array',
+            items: USER_SCHEMA,
+            stats: FIELD_STATS,
+          },
+          total: { type: 'integer', stats: FIELD_STATS },
+        },
+        required: ['data', 'total'],
+        stats: FIELD_STATS,
+      };
+      const schemas = [
+        makeAggregatedSchema({
+          httpMethod: 'GET',
+          path: '/users',
+          responseSchemas: { '200': listWrapper },
+        }),
+        makeAggregatedSchema({
+          id: 2,
+          httpMethod: 'GET',
+          path: '/orgs/{orgId}/users',
+          responseSchemas: { '200': listWrapper },
+        }),
+      ];
+
+      const registry = discoverDomainModels(schemas);
+      const wrapperModel = registry.models.find((m) => m.name === 'ListResponse');
+      expect(wrapperModel).toBeDefined();
+    });
+
+    it('prefers 2xx response usages for path-based naming over 4xx ones', () => {
+      // Same domain shape appears as a 200 on /accounts/{id} and as a 404 on
+      // /users/{id}. The 2xx usage on /accounts should drive the name.
+      const accountSchema: InferredSchema = {
+        type: 'object',
+        properties: {
+          accountId: { type: 'integer', stats: FIELD_STATS },
+          balance: { type: 'number', stats: FIELD_STATS },
+          owner: { type: 'string', stats: FIELD_STATS },
+        },
+        required: ['accountId', 'balance', 'owner'],
+        stats: FIELD_STATS,
+      };
+      const schemas = [
+        makeAggregatedSchema({
+          httpMethod: 'GET',
+          path: '/users/{userId}',
+          responseSchemas: { '404': accountSchema },
+        }),
+        makeAggregatedSchema({
+          id: 2,
+          httpMethod: 'GET',
+          path: '/accounts/{accountId}',
+          responseSchemas: { '200': accountSchema },
+        }),
+      ];
+
+      const registry = discoverDomainModels(schemas);
+      expect(registry.models[0].name).toBe('Account');
+    });
+
     it('usages record httpMethod correctly', () => {
       const schemas = [
         makeAggregatedSchema({

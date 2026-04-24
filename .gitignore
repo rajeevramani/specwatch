@@ -14,3 +14,9 @@ adapters/
 # Dolt database files (added by bd init)
 .dolt/
 .specwatch-model-prep
+
+# Tooling scratch
+.playwright-mcp/
+
+# Eval run artifacts
+mockbank-openapi.yaml

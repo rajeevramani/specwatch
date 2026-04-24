@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Remove the per-project Specwatch PID file
+DIR="$(dirname "$0")"
+rm -f "$("$DIR/specwatch-pid-path")"

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Print the per-project Specwatch PID file path so concurrent sessions in
+# different projects do not collide on a shared /tmp location.
+KEY="${CLAUDE_PROJECT_DIR:-$PWD}"
+HASH=$(printf '%s' "$KEY" | shasum | awk '{print $1}' | cut -c1-8)
+echo "${TMPDIR:-/tmp}/specwatch-plugin-${HASH}.pid"

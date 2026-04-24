@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Gracefully stop the tracked specwatch proxy with liveness check + timeout.
+# Usage: specwatch-stop-fg
+#
+# Exit codes:
+#   0 — proxy stopped (or none was running, or was stale)
+#   1 — proxy still running after SIGKILL (should be impossible)
+set -u
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PID=$("$DIR/specwatch-pid-read")
+if [ -z "$PID" ]; then
+  echo "STATE=no_pid_tracked"
+  exit 0
+fi
+if ! kill -0 "$PID" 2>/dev/null; then
+  echo "STATE=stale_pid pid=$PID"
+  "$DIR/specwatch-pid-clear"
+  exit 0
+fi
+echo "STATE=killing pid=$PID"
+kill -TERM "$PID"
+for i in $(seq 1 30); do
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "STATE=stopped_after=${i}s"
+    "$DIR/specwatch-pid-clear"
+    exit 0
+  fi
+  sleep 1
+done
+echo "STATE=sigterm_timeout escalating to SIGKILL" >&2
+kill -KILL "$PID" 2>/dev/null || true
+sleep 1
+"$DIR/specwatch-pid-clear"
+if kill -0 "$PID" 2>/dev/null; then
+  echo "STATE=still_alive pid=$PID" >&2
+  exit 1
+fi
+echo "STATE=killed_via_sigkill"
+exit 0

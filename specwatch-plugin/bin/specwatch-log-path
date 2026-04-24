@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Print the per-project Specwatch proxy log path.
+KEY="${CLAUDE_PROJECT_DIR:-$PWD}"
+HASH=$(printf '%s' "$KEY" | shasum | awk '{print $1}' | cut -c1-8)
+echo "${TMPDIR:-/tmp}/specwatch-proxy-${HASH}.log"

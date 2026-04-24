@@ -1,0 +1,12 @@
+{
+  "name": "specwatch",
+  "version": "0.3.3",
+  "description": "Learn API schemas from live traffic and generate OpenAPI specs. Capture traffic, infer schemas, diff snapshots, and bring specs into conversation context.",
+  "author": {
+    "name": "Rajeev Ramani",
+    "url": "https://github.com/rajeevramani/specwatch"
+  },
+  "repository": "https://github.com/rajeevramani/specwatch",
+  "license": "MIT",
+  "keywords": ["api", "openapi", "schema", "proxy", "traffic-capture"]
+}

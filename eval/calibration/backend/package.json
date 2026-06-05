@@ -1,0 +1,28 @@
+{
+  "name": "@calibration/backend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Thin REST CRUD backend (customers/orders/line-items) for the JAIRF calibration harness. Deterministic SQLite seed, test-only /__truth readback, THIN_RESPONSES toggle for the response-completeness ablation.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

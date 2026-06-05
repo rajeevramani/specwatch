@@ -20,7 +20,7 @@ import { dirname, resolve } from 'node:path';
 import { parseSpec } from '../packages/agentready-scoring/src/index.js';
 import { runVariant, DEFAULT_MODEL, SYSTEM_PROMPT, type VariantRunResult } from './runner.js';
 import { MockLlmClient, AnthropicLlmClient, type LlmClient } from './llm.js';
-import { GOLD_MOCK_PLANS } from './mock-plans.js';
+import { GOLD_MOCK_PLANS, MOCK_OP_ROUTES } from './mock-plans.js';
 import { captureVariant } from './capture.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -112,6 +112,9 @@ async function main(): Promise<void> {
     client,
     thinResponses,
     maxSteps: args.maxSteps,
+    // Mock emits gold operationIds; alias them by route so a variant that mangled
+    // the ids still runs end-to-end. Live agent gets no aliases (degradation real).
+    nameAliases: args.live ? undefined : MOCK_OP_ROUTES,
     onRecord: (r) => {
       console.log(
         `  ${r.success ? 'PASS' : 'FAIL'}  ${r.taskId.padEnd(28)} ` +

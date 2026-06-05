@@ -15,6 +15,37 @@
 import { getTask } from '../tasks/index.js';
 import type { MockContext, MockPlan } from './llm.js';
 
+/**
+ * Stable route (METHOD /path) for each gold operationId the mock plans call by
+ * name. The runner uses this to resolve a mock's gold-named call against the
+ * ACTIVE variant's tools even when that variant mangled the operationId (the
+ * `bad-operationids` / `all-bad` variants): the route is structural and never
+ * changes, so the mock pipeline runs end-to-end on every variant. Aliasing is
+ * applied for the MOCK agent only — the live agent's own tool names route
+ * directly, so spec degradation stays visible to it (see runner RunOptions).
+ *
+ * Source of truth: specs/gold.yaml (frozen). Keep in sync if the gold spec's
+ * routes change.
+ */
+export const MOCK_OP_ROUTES: Record<string, string> = {
+  createCustomer: 'POST /customers',
+  updateCustomer: 'PUT /customers/{customerId}',
+  deleteCustomer: 'DELETE /customers/{customerId}',
+  listOrders: 'GET /orders',
+  createOrder: 'POST /orders',
+  updateOrder: 'PUT /orders/{orderId}',
+  cancelOrder: 'POST /orders/{orderId}/cancel',
+  listLineItems: 'GET /line-items',
+  createLineItem: 'POST /line-items',
+  updateLineItem: 'PUT /line-items/{lineItemId}',
+};
+
+/** Coerce a prior tool output to an array; non-array (e.g. an error string from
+ * a failed call) becomes `[]` so plan callbacks never crash on `.find`. */
+function asArray(value: unknown): any[] {
+  return Array.isArray(value) ? value : [];
+}
+
 /** Pull the JSON body of the Nth call to a given tool from the mock context. */
 function outputOf(ctx: MockContext, toolName: string, occurrence = 0): any {
   let seen = 0;
@@ -124,7 +155,7 @@ export const GOLD_MOCK_PLANS: Record<string, MockPlan> = {
         {
           name: 'updateOrder',
           input: (ctx) => {
-            const orders: any[] = outputOf(ctx, 'listOrders') ?? [];
+            const orders = asArray(outputOf(ctx, 'listOrders'));
             const pending = orders.find((o) => o.status === 'pending');
             return { orderId: pending?.id, status: 'paid' };
           },
@@ -137,7 +168,7 @@ export const GOLD_MOCK_PLANS: Record<string, MockPlan> = {
         {
           name: 'updateOrder',
           input: (ctx) => {
-            const orders: any[] = outputOf(ctx, 'listOrders') ?? [];
+            const orders = asArray(outputOf(ctx, 'listOrders'));
             const pending = orders.find((o) => o.status === 'pending');
             return { orderId: pending?.id, status: 'shipped' };
           },
@@ -156,7 +187,7 @@ export const GOLD_MOCK_PLANS: Record<string, MockPlan> = {
         {
           name: 'updateLineItem',
           input: (ctx) => {
-            const items: any[] = outputOf(ctx, 'listLineItems') ?? [];
+            const items = asArray(outputOf(ctx, 'listLineItems'));
             const widgetA = items.find((li) => li.sku === 'WIDGET-A');
             return { lineItemId: widgetA?.id, sku: 'WIDGET-A', quantity: 7, unit_price: 1500 };
           },

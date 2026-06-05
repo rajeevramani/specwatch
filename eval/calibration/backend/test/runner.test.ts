@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { parseSpec } from '../../packages/agentready-scoring/src/index.js';
 import { specToTools, toWireTools } from '../../runner/tools.js';
 import { MockLlmClient } from '../../runner/llm.js';
-import { GOLD_MOCK_PLANS } from '../../runner/mock-plans.js';
+import { GOLD_MOCK_PLANS, MOCK_OP_ROUTES } from '../../runner/mock-plans.js';
 import { runVariant, SYSTEM_PROMPT } from '../../runner/runner.js';
 import { TASKS } from '../../tasks/index.js';
 
@@ -125,6 +125,75 @@ describe('runVariant on gold (mock agent, no paid calls)', () => {
 
   it('uses the fixed system prompt for the agent (a constant)', () => {
     expect(SYSTEM_PROMPT).toContain('automated API client');
+  });
+});
+
+describe('runVariant on every ablation variant (specwatch-o5l)', () => {
+  const VARIANTS_DIR = resolve(here, '../../variants');
+  // Variants whose operationIds the spec mangles -> tool names diverge from the
+  // gold names the mock emits. These previously crashed mid-run.
+  const ALL_VARIANTS = [
+    'gold',
+    'no-descriptions',
+    'no-examples',
+    'no-error-schemas',
+    'bad-operationids',
+    'thin-responses',
+    'all-bad',
+  ];
+
+  function loadVariant(name: string): any {
+    const file = name === 'gold' ? GOLD_SPEC : resolve(VARIANTS_DIR, `${name}.yaml`);
+    return parseSpec(readFileSync(file, 'utf8'));
+  }
+
+  for (const variant of ALL_VARIANTS) {
+    it(`completes the full task set without crashing on "${variant}"`, async () => {
+      const client = new MockLlmClient(GOLD_MOCK_PLANS, 'mock:test');
+      // Mock emits gold operationIds; alias them by route so changed-id variants
+      // still resolve. This is exactly what `calib:run` (mock mode) passes.
+      const result = await runVariant({
+        variant,
+        spec: loadVariant(variant),
+        client,
+        nameAliases: MOCK_OP_ROUTES,
+      });
+      // Every task produced a record; nothing threw mid-capture.
+      expect(result.records.length).toBe(TASKS.length);
+      for (const r of result.records) {
+        expect(typeof r.success).toBe('boolean');
+        expect(r.transcript.length).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  it('routes gold-named mock calls to mangled tools on bad-operationids', async () => {
+    // Sanity: the variant really does rename the tools (otherwise the test is moot).
+    const tools = specToTools(loadVariant('bad-operationids'));
+    expect(tools.map((t) => t.name)).not.toContain('createCustomer');
+    // Yet the aliased mock still drives the tasks to completion end-to-end.
+    const result = await runVariant({
+      variant: 'bad-operationids',
+      spec: loadVariant('bad-operationids'),
+      client: new MockLlmClient(GOLD_MOCK_PLANS, 'mock:test'),
+      nameAliases: MOCK_OP_ROUTES,
+    });
+    expect(result.records.length).toBe(TASKS.length);
+    // With routing resolved by route, the competent mock satisfies the tasks.
+    expect(result.passCount).toBeGreaterThan(0);
+  });
+
+  it('without aliases, changed-id variants degrade gracefully (no crash, tasks fail)', async () => {
+    // The live agent path passes no aliases; a gold-named call that no longer
+    // exists must fail cleanly (unknown-tool error), never throw.
+    const result = await runVariant({
+      variant: 'bad-operationids',
+      spec: loadVariant('bad-operationids'),
+      client: new MockLlmClient(GOLD_MOCK_PLANS, 'mock:test'),
+      // nameAliases intentionally omitted
+    });
+    expect(result.records.length).toBe(TASKS.length);
+    expect(result.passCount).toBe(0);
   });
 });
 

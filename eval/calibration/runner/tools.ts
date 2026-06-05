@@ -221,6 +221,16 @@ export function specToTools(spec: any): AgentTool[] {
   return tools;
 }
 
+/**
+ * Stable route key for a tool: `METHOD /path/template`. Unlike the tool *name*
+ * (derived from `operationId`, which the `bad-operationids` variant mangles),
+ * the method+path is structural and identical across every ablation variant — so
+ * it is a safe anchor for resolving an operation regardless of its degraded name.
+ */
+export function routeKeyOf(tool: AgentTool): string {
+  return `${tool._http.method} ${tool._http.pathTemplate}`;
+}
+
 /** Strip private `_http` metadata, yielding the exact shape sent to the model. */
 export function toWireTools(tools: AgentTool[]): Array<{
   name: string;

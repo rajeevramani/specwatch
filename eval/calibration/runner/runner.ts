@@ -24,7 +24,7 @@ import type { AddressInfo } from 'node:net';
 import { createApp } from '../backend/src/app.js';
 import { TASKS, checkTask, fetchTruth } from '../tasks/index.js';
 import type { CalibrationTask, TaskResult } from '../tasks/index.js';
-import { specToTools, toWireTools, type AgentTool } from './tools.js';
+import { specToTools, toWireTools, routeKeyOf, type AgentTool } from './tools.js';
 import type {
   LlmClient,
   LlmRequest,
@@ -120,6 +120,15 @@ export interface RunOptions {
   thinResponses?: boolean;
   /** Safety cap on loop steps per task. */
   maxSteps?: number;
+  /**
+   * Optional map of agent-emitted tool name -> stable route key (`METHOD /path`).
+   * Used to resolve a call whose name is absent from THIS variant's tools (e.g.
+   * the deterministic mock emits gold operationIds, which the `bad-operationids`
+   * variant has mangled) against the variant tool sharing that route. Supplied
+   * for the MOCK agent only — the live agent emits the variant's own tool names,
+   * so it gets no aliasing and spec degradation stays visible to it.
+   */
+  nameAliases?: Record<string, string>;
   /** Optional progress callback. */
   onRecord?: (record: TaskRunRecord) => void;
 }
@@ -161,17 +170,18 @@ function buildQuery(input: Record<string, unknown>, tool: AgentTool): string {
 /** Execute one tool call as an HTTP request against the backend. */
 async function executeTool(
   baseUrl: string,
-  toolsByName: Map<string, AgentTool>,
+  resolveTool: (name: string) => AgentTool | undefined,
+  availableNames: string[],
   use: LlmToolUse,
 ): Promise<TranscriptToolCall> {
-  const tool = toolsByName.get(use.name);
+  const tool = resolveTool(use.name);
   if (!tool) {
     return {
       id: use.id,
       name: use.name,
       input: use.input,
       status: null,
-      response: `No tool named "${use.name}" exists. Available tools: ${[...toolsByName.keys()].join(', ')}`,
+      response: `No tool named "${use.name}" exists. Available tools: ${availableNames.join(', ')}`,
       isError: true,
       httpMethod: null,
       rawPath: null,
@@ -235,10 +245,11 @@ async function runTask(
   variant: string,
   task: CalibrationTask,
   tools: AgentTool[],
+  resolveTool: (name: string) => AgentTool | undefined,
   client: LlmClient,
   maxSteps: number,
 ): Promise<TaskRunRecord> {
-  const toolsByName = new Map(tools.map((t) => [t.name, t]));
+  const availableNames = tools.map((t) => t.name);
   const wireTools = toWireTools(tools);
   const turns: LlmTurn[] = [{ role: 'user', text: task.prompt }];
   const transcript: TranscriptEntry[] = [{ kind: 'prompt', text: task.prompt }];
@@ -264,7 +275,7 @@ async function runTask(
     const results: LlmToolResult[] = [];
     for (const use of resp.toolUses) {
       callCount += 1;
-      const call = await executeTool(baseUrl, toolsByName, use);
+      const call = await executeTool(baseUrl, resolveTool, availableNames, use);
       toolCalls.push(call);
       results.push({ toolUseId: use.id, content: call.response, isError: call.isError });
     }
@@ -310,11 +321,32 @@ export async function runVariant(opts: RunOptions): Promise<VariantRunResult> {
   const maxSteps = opts.maxSteps ?? 25;
   const tools = specToTools(opts.spec);
 
+  // Resolve an agent-emitted tool name to a variant tool: exact name first, then
+  // (for the mock's gold-named calls) by stable route via nameAliases. The live
+  // agent passes no aliases, so it resolves by name only — degraded names fail.
+  const byName = new Map(tools.map((t) => [t.name, t]));
+  const byRoute = new Map(tools.map((t) => [routeKeyOf(t), t]));
+  const aliases = opts.nameAliases ?? {};
+  const resolveTool = (name: string): AgentTool | undefined => {
+    const direct = byName.get(name);
+    if (direct) return direct;
+    const route = aliases[name];
+    return route ? byRoute.get(route) : undefined;
+  };
+
   const records: TaskRunRecord[] = [];
   for (const task of tasks) {
     const backend = await startBackend(thinResponses);
     try {
-      const record = await runTask(backend.baseUrl, opts.variant, task, tools, opts.client, maxSteps);
+      const record = await runTask(
+        backend.baseUrl,
+        opts.variant,
+        task,
+        tools,
+        resolveTool,
+        opts.client,
+        maxSteps,
+      );
       records.push(record);
       opts.onRecord?.(record);
     } finally {

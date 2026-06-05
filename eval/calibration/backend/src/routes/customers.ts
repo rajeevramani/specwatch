@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getLocals, writeBody } from '../app.js';
 import { nextId } from '../ids.js';
+import { sendProblem } from '../errors.js';
 
 export const customersRouter = Router();
 
@@ -26,7 +27,7 @@ customersRouter.get('/', (req, res) => {
 // Read
 customersRouter.get('/:id', (req, res) => {
   const c = getCustomer(req, req.params.id);
-  if (!c) return res.status(404).json({ error: 'not_found' });
+  if (!c) return sendProblem(res, 404, 'not_found', 'No customer exists with the supplied identifier.');
   res.json(c);
 });
 
@@ -34,7 +35,7 @@ customersRouter.get('/:id', (req, res) => {
 customersRouter.post('/', (req, res) => {
   const { name, email } = req.body ?? {};
   if (typeof name !== 'string' || typeof email !== 'string') {
-    return res.status(400).json({ error: 'invalid_body', message: 'name and email are required' });
+    return sendProblem(res, 400, 'invalid_body', 'name and email are required');
   }
   const db = getLocals(req).db;
   const id = nextId(db, 'customers', 'cus');
@@ -47,7 +48,7 @@ customersRouter.post('/', (req, res) => {
       created_at,
     );
   } catch (e) {
-    return res.status(409).json({ error: 'conflict', message: (e as Error).message });
+    return sendProblem(res, 409, 'conflict', (e as Error).message);
   }
   const created: Customer = { id, name, email, created_at };
   res.status(201).json(writeBody(req, created));
@@ -56,10 +57,10 @@ customersRouter.post('/', (req, res) => {
 // Update (full replace of mutable fields)
 customersRouter.put('/:id', (req, res) => {
   const existing = getCustomer(req, req.params.id);
-  if (!existing) return res.status(404).json({ error: 'not_found' });
+  if (!existing) return sendProblem(res, 404, 'not_found', 'No customer exists with the supplied identifier.');
   const { name, email } = req.body ?? {};
   if (typeof name !== 'string' || typeof email !== 'string') {
-    return res.status(400).json({ error: 'invalid_body', message: 'name and email are required' });
+    return sendProblem(res, 400, 'invalid_body', 'name and email are required');
   }
   const db = getLocals(req).db;
   try {
@@ -69,7 +70,7 @@ customersRouter.put('/:id', (req, res) => {
       req.params.id,
     );
   } catch (e) {
-    return res.status(409).json({ error: 'conflict', message: (e as Error).message });
+    return sendProblem(res, 409, 'conflict', (e as Error).message);
   }
   const updated: Customer = { ...existing, name, email };
   res.json(writeBody(req, updated));
@@ -79,6 +80,6 @@ customersRouter.put('/:id', (req, res) => {
 customersRouter.delete('/:id', (req, res) => {
   const db = getLocals(req).db;
   const info = db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
-  if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
+  if (info.changes === 0) return sendProblem(res, 404, 'not_found', 'No customer exists with the supplied identifier.');
   res.status(204).end();
 });

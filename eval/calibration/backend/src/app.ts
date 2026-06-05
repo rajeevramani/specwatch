@@ -5,6 +5,7 @@ import { customersRouter } from './routes/customers.js';
 import { ordersRouter } from './routes/orders.js';
 import { lineItemsRouter } from './routes/line-items.js';
 import { truthRouter } from './routes/truth.js';
+import { sendProblem } from './errors.js';
 
 export interface AppOptions {
   /** SQLite file path or ':memory:'. */
@@ -50,13 +51,13 @@ export function createApp(opts: AppOptions = {}): CalibApp {
 
   // 404 for unknown routes.
   app.use((_req: Request, res: Response) => {
-    res.status(404).json({ error: 'not_found' });
+    sendProblem(res, 404, 'not_found', 'No resource exists at the requested path.');
   });
 
-  // JSON error handler.
+  // problem+json error handler.
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    const message = err instanceof Error ? err.message : 'internal_error';
-    res.status(500).json({ error: 'internal_error', message });
+    const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+    sendProblem(res, 500, 'internal_error', message);
   });
 
   return { app, db, thinResponses };

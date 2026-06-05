@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getLocals, writeBody } from '../app.js';
 import { nextId } from '../ids.js';
+import { sendProblem } from '../errors.js';
 
 // Line-items are nested under an order: /orders/:orderId/line-items as well as
 // a flat /line-items/:id for direct read/update/delete.
@@ -35,7 +36,7 @@ lineItemsRouter.get('/', (req, res) => {
 // Read
 lineItemsRouter.get('/:id', (req, res) => {
   const li = getLineItem(req, req.params.id);
-  if (!li) return res.status(404).json({ error: 'not_found' });
+  if (!li) return sendProblem(res, 404, 'not_found', 'No line item exists with the supplied identifier.');
   res.json(li);
 });
 
@@ -50,15 +51,17 @@ lineItemsRouter.post('/', (req, res) => {
     !Number.isInteger(unit_price) ||
     unit_price < 0
   ) {
-    return res.status(400).json({
-      error: 'invalid_body',
-      message: 'order_id, sku, positive integer quantity and non-negative integer unit_price are required',
-    });
+    return sendProblem(
+      res,
+      400,
+      'invalid_body',
+      'order_id, sku, positive integer quantity and non-negative integer unit_price are required',
+    );
   }
   const db = getLocals(req).db;
   const order = db.prepare('SELECT id FROM orders WHERE id = ?').get(order_id);
   if (!order) {
-    return res.status(422).json({ error: 'unprocessable', message: 'order_id does not exist' });
+    return sendProblem(res, 422, 'unprocessable', 'order_id does not exist');
   }
   const id = nextId(db, 'line_items', 'li');
   db.prepare(
@@ -71,7 +74,7 @@ lineItemsRouter.post('/', (req, res) => {
 // Update
 lineItemsRouter.put('/:id', (req, res) => {
   const existing = getLineItem(req, req.params.id);
-  if (!existing) return res.status(404).json({ error: 'not_found' });
+  if (!existing) return sendProblem(res, 404, 'not_found', 'No line item exists with the supplied identifier.');
   const { sku, quantity, unit_price } = req.body ?? {};
   if (
     typeof sku !== 'string' ||
@@ -80,10 +83,12 @@ lineItemsRouter.put('/:id', (req, res) => {
     !Number.isInteger(unit_price) ||
     unit_price < 0
   ) {
-    return res.status(400).json({
-      error: 'invalid_body',
-      message: 'sku, positive integer quantity and non-negative integer unit_price are required',
-    });
+    return sendProblem(
+      res,
+      400,
+      'invalid_body',
+      'sku, positive integer quantity and non-negative integer unit_price are required',
+    );
   }
   const db = getLocals(req).db;
   db.prepare('UPDATE line_items SET sku = ?, quantity = ?, unit_price = ? WHERE id = ?').run(
@@ -100,6 +105,6 @@ lineItemsRouter.put('/:id', (req, res) => {
 lineItemsRouter.delete('/:id', (req, res) => {
   const db = getLocals(req).db;
   const info = db.prepare('DELETE FROM line_items WHERE id = ?').run(req.params.id);
-  if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
+  if (info.changes === 0) return sendProblem(res, 404, 'not_found', 'No line item exists with the supplied identifier.');
   res.status(204).end();
 });

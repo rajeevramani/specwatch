@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getLocals, writeBody } from '../app.js';
 import { nextId } from '../ids.js';
+import { sendProblem } from '../errors.js';
 
 export const ordersRouter = Router();
 
@@ -35,7 +36,7 @@ ordersRouter.get('/', (req, res) => {
 // Read
 ordersRouter.get('/:id', (req, res) => {
   const o = getOrder(req, req.params.id);
-  if (!o) return res.status(404).json({ error: 'not_found' });
+  if (!o) return sendProblem(res, 404, 'not_found', 'No order exists with the supplied identifier.');
   res.json(o);
 });
 
@@ -43,16 +44,16 @@ ordersRouter.get('/:id', (req, res) => {
 ordersRouter.post('/', (req, res) => {
   const { customer_id, status } = req.body ?? {};
   if (typeof customer_id !== 'string') {
-    return res.status(400).json({ error: 'invalid_body', message: 'customer_id is required' });
+    return sendProblem(res, 400, 'invalid_body', 'customer_id is required');
   }
   const st: Status = status ?? 'pending';
   if (!STATUSES.includes(st)) {
-    return res.status(400).json({ error: 'invalid_body', message: `status must be one of ${STATUSES.join(', ')}` });
+    return sendProblem(res, 400, 'invalid_body', `status must be one of ${STATUSES.join(', ')}`);
   }
   const db = getLocals(req).db;
   const customer = db.prepare('SELECT id FROM customers WHERE id = ?').get(customer_id);
   if (!customer) {
-    return res.status(422).json({ error: 'unprocessable', message: 'customer_id does not exist' });
+    return sendProblem(res, 422, 'unprocessable', 'customer_id does not exist');
   }
   const id = nextId(db, 'orders', 'ord');
   const created_at = new Date().toISOString();
@@ -69,10 +70,10 @@ ordersRouter.post('/', (req, res) => {
 // Update status (PUT full mutable replace)
 ordersRouter.put('/:id', (req, res) => {
   const existing = getOrder(req, req.params.id);
-  if (!existing) return res.status(404).json({ error: 'not_found' });
+  if (!existing) return sendProblem(res, 404, 'not_found', 'No order exists with the supplied identifier.');
   const { status } = req.body ?? {};
   if (!STATUSES.includes(status)) {
-    return res.status(400).json({ error: 'invalid_body', message: `status must be one of ${STATUSES.join(', ')}` });
+    return sendProblem(res, 400, 'invalid_body', `status must be one of ${STATUSES.join(', ')}`);
   }
   const db = getLocals(req).db;
   db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(status, req.params.id);
@@ -83,7 +84,7 @@ ordersRouter.put('/:id', (req, res) => {
 // Cancel (convenience verb modeled as a sub-resource action)
 ordersRouter.post('/:id/cancel', (req, res) => {
   const existing = getOrder(req, req.params.id);
-  if (!existing) return res.status(404).json({ error: 'not_found' });
+  if (!existing) return sendProblem(res, 404, 'not_found', 'No order exists with the supplied identifier.');
   const db = getLocals(req).db;
   db.prepare('UPDATE orders SET status = ? WHERE id = ?').run('cancelled', req.params.id);
   const updated: Order = { ...existing, status: 'cancelled' };
@@ -94,6 +95,6 @@ ordersRouter.post('/:id/cancel', (req, res) => {
 ordersRouter.delete('/:id', (req, res) => {
   const db = getLocals(req).db;
   const info = db.prepare('DELETE FROM orders WHERE id = ?').run(req.params.id);
-  if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
+  if (info.changes === 0) return sendProblem(res, 404, 'not_found', 'No order exists with the supplied identifier.');
   res.status(204).end();
 });

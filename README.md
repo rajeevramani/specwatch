@@ -15,6 +15,27 @@ It runs as a local reverse proxy. No cloud. No agents. One CLI command and a SQL
 
 ---
 
+## Positioning
+
+Specwatch is a local developer tool for dev and staging environments. It turns observed behaviour into artefacts you can review, version, and act on.
+
+**What it's for:**
+
+- Bootstrapping OpenAPI specs from undocumented or legacy APIs
+- Catching schema drift between staging and production before it breaks clients
+- Debugging why AI agents are wasting calls or looping on your tools
+- Giving teams something concrete to review — not a guess, a transcript
+
+**What it's not:**
+
+- **A production observability tool.** Don't put it in a payment flow or any critical path. It's a proxy on your developer laptop or in a staging environment, not a layer in front of production traffic.
+- **A source of truth on its own.** Inferred specs reflect observed traffic, not the full contract. Rare error branches, edge cases, and seldom-used fields are absent if they didn't flow through the proxy. A generated spec is a starting point for human review — not a finished artefact.
+- **A legacy protocol translator.** JSON over HTTP only. SOAP, ISO-8583, fixed-width files, and binary RPC are out of scope.
+
+**What's next:** coverage reporting lands in the next release. Every generated spec will ship alongside a machine-readable report of what Specwatch *didn't* see — declared-but-unobserved operations, missing error codes, fields below the sample threshold. That makes the gaps explicit so reviewers know where to fill in.
+
+---
+
 ## API Schema Learning
 
 ![Specwatch Pipeline](docs/images/specwatch-pipeline.png)
@@ -251,7 +272,6 @@ Five layers, each isolated:
 
 ## Caveats
 
-- **Schemas reflect observed traffic, not the full API contract.** Fields never seen won't appear in the spec.
 - **Numeric fields typed as `integer` when only whole numbers observed.** Specwatch infers the narrowest type that fits.
 - **Enum detection requires sufficient samples.** ≥10 samples, ≤10 distinct values.
 - **Database migrations are automatic** when upgrading.

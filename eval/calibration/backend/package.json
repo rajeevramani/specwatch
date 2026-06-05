@@ -13,7 +13,8 @@
     "lint:spec": "npx --yes @redocly/cli@latest lint ../specs/gold.yaml",
     "lint:variants": "npx --yes @redocly/cli@latest lint ../variants/*.yaml",
     "score:gold": "tsx ../specs/score-gold.ts",
-    "ablate": "tsx ../ablate.ts"
+    "ablate": "tsx ../ablate.ts",
+    "check:tasks": "tsx ../tasks/check.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

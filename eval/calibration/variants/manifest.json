@@ -1,0 +1,372 @@
+{
+  "generatedAt": "2026-06-05T12:30:27.360Z",
+  "gold": "specs/gold.yaml",
+  "variants": [
+    {
+      "name": "gold",
+      "label": "Baseline — no degradation.",
+      "degrades": [],
+      "runtimeDriven": false,
+      "spec": "variants/gold.yaml",
+      "jairf": {
+        "overall": 93,
+        "grade": "A",
+        "level": 4
+      },
+      "categories": {
+        "fc": 100,
+        "dxj": 82,
+        "arax": 92,
+        "au": 100,
+        "sec": 95,
+        "aid": 90
+      },
+      "signals": {
+        "spec_valid": 100,
+        "info_complete": 100,
+        "refs_resolvable": 100,
+        "structural_integrity": 100,
+        "request_examples": 35,
+        "response_examples": 100,
+        "response_2xx_coverage": 75,
+        "doc_clarity": 100,
+        "schema_reuse": 100,
+        "summary_coverage": 100,
+        "description_coverage": 100,
+        "operationid_quality": 100,
+        "type_specificity": 52,
+        "error_standardization": 100,
+        "policy_presence": 100,
+        "complexity": 100,
+        "distinctiveness": 100,
+        "pagination": 100,
+        "idempotency_safety": 100,
+        "tool_calling": 100,
+        "auth_coverage": 100,
+        "auth_strength": 80,
+        "transport_security": 100,
+        "secret_hygiene": 100,
+        "descriptive_richness": 100,
+        "intent_phrasing": 100,
+        "domain_tagging": 100,
+        "registry_signals": 60
+      }
+    },
+    {
+      "name": "no-descriptions",
+      "label": "Strip all operation/parameter/schema/info descriptions.",
+      "degrades": [
+        "descriptions"
+      ],
+      "runtimeDriven": false,
+      "spec": "variants/no-descriptions.yaml",
+      "jairf": {
+        "overall": 84,
+        "grade": "B",
+        "level": 3
+      },
+      "categories": {
+        "fc": 100,
+        "dxj": 67,
+        "arax": 80,
+        "au": 100,
+        "sec": 95,
+        "aid": 72
+      },
+      "signals": {
+        "spec_valid": 100,
+        "info_complete": 100,
+        "refs_resolvable": 100,
+        "structural_integrity": 100,
+        "request_examples": 35,
+        "response_examples": 100,
+        "response_2xx_coverage": 75,
+        "doc_clarity": 26,
+        "schema_reuse": 100,
+        "summary_coverage": 100,
+        "description_coverage": 26,
+        "operationid_quality": 100,
+        "type_specificity": 52,
+        "error_standardization": 100,
+        "policy_presence": 100,
+        "complexity": 100,
+        "distinctiveness": 100,
+        "pagination": 100,
+        "idempotency_safety": 100,
+        "tool_calling": 100,
+        "auth_coverage": 100,
+        "auth_strength": 80,
+        "transport_security": 100,
+        "secret_hygiene": 100,
+        "descriptive_richness": 26,
+        "intent_phrasing": 100,
+        "domain_tagging": 100,
+        "registry_signals": 60
+      }
+    },
+    {
+      "name": "bad-operationids",
+      "label": "Remove some operationIds and mangle the casing of the rest.",
+      "degrades": [
+        "operationId"
+      ],
+      "runtimeDriven": false,
+      "spec": "variants/bad-operationids.yaml",
+      "jairf": {
+        "overall": 87,
+        "grade": "B",
+        "level": 3
+      },
+      "categories": {
+        "fc": 100,
+        "dxj": 82,
+        "arax": 79,
+        "au": 86,
+        "sec": 95,
+        "aid": 90
+      },
+      "signals": {
+        "spec_valid": 100,
+        "info_complete": 100,
+        "refs_resolvable": 100,
+        "structural_integrity": 100,
+        "request_examples": 35,
+        "response_examples": 100,
+        "response_2xx_coverage": 75,
+        "doc_clarity": 100,
+        "schema_reuse": 100,
+        "summary_coverage": 100,
+        "description_coverage": 100,
+        "operationid_quality": 22,
+        "type_specificity": 52,
+        "error_standardization": 100,
+        "policy_presence": 100,
+        "complexity": 100,
+        "distinctiveness": 64,
+        "pagination": 100,
+        "idempotency_safety": 100,
+        "tool_calling": 65,
+        "auth_coverage": 100,
+        "auth_strength": 80,
+        "transport_security": 100,
+        "secret_hygiene": 100,
+        "descriptive_richness": 100,
+        "intent_phrasing": 100,
+        "domain_tagging": 100,
+        "registry_signals": 60
+      }
+    },
+    {
+      "name": "no-examples",
+      "label": "Strip all request/response/schema examples.",
+      "degrades": [
+        "examples"
+      ],
+      "runtimeDriven": false,
+      "spec": "variants/no-examples.yaml",
+      "jairf": {
+        "overall": 84,
+        "grade": "B",
+        "level": 3
+      },
+      "categories": {
+        "fc": 100,
+        "dxj": 55,
+        "arax": 92,
+        "au": 100,
+        "sec": 95,
+        "aid": 90
+      },
+      "signals": {
+        "spec_valid": 100,
+        "info_complete": 100,
+        "refs_resolvable": 100,
+        "structural_integrity": 100,
+        "request_examples": 0,
+        "response_examples": 0,
+        "response_2xx_coverage": 75,
+        "doc_clarity": 100,
+        "schema_reuse": 100,
+        "summary_coverage": 100,
+        "description_coverage": 100,
+        "operationid_quality": 100,
+        "type_specificity": 52,
+        "error_standardization": 100,
+        "policy_presence": 100,
+        "complexity": 100,
+        "distinctiveness": 100,
+        "pagination": 100,
+        "idempotency_safety": 100,
+        "tool_calling": 100,
+        "auth_coverage": 100,
+        "auth_strength": 80,
+        "transport_security": 100,
+        "secret_hygiene": 100,
+        "descriptive_richness": 100,
+        "intent_phrasing": 100,
+        "domain_tagging": 100,
+        "registry_signals": 60
+      }
+    },
+    {
+      "name": "no-error-schemas",
+      "label": "Remove schema/content from every 4xx/5xx/default response.",
+      "degrades": [
+        "errorSchemas"
+      ],
+      "runtimeDriven": false,
+      "spec": "variants/no-error-schemas.yaml",
+      "jairf": {
+        "overall": 88,
+        "grade": "B",
+        "level": 3
+      },
+      "categories": {
+        "fc": 100,
+        "dxj": 82,
+        "arax": 76,
+        "au": 100,
+        "sec": 95,
+        "aid": 90
+      },
+      "signals": {
+        "spec_valid": 100,
+        "info_complete": 100,
+        "refs_resolvable": 100,
+        "structural_integrity": 100,
+        "request_examples": 35,
+        "response_examples": 100,
+        "response_2xx_coverage": 75,
+        "doc_clarity": 100,
+        "schema_reuse": 100,
+        "summary_coverage": 100,
+        "description_coverage": 100,
+        "operationid_quality": 100,
+        "type_specificity": 55,
+        "error_standardization": 0,
+        "policy_presence": 100,
+        "complexity": 100,
+        "distinctiveness": 100,
+        "pagination": 100,
+        "idempotency_safety": 100,
+        "tool_calling": 100,
+        "auth_coverage": 100,
+        "auth_strength": 80,
+        "transport_security": 100,
+        "secret_hygiene": 100,
+        "descriptive_richness": 100,
+        "intent_phrasing": 100,
+        "domain_tagging": 100,
+        "registry_signals": 60
+      }
+    },
+    {
+      "name": "thin-responses",
+      "label": "Response completeness — RUNTIME signal via backend THIN_RESPONSES toggle. Spec equals gold; degradation is applied at run time, not in the document.",
+      "degrades": [
+        "completeness"
+      ],
+      "runtimeDriven": true,
+      "spec": "variants/thin-responses.yaml",
+      "jairf": {
+        "overall": 93,
+        "grade": "A",
+        "level": 4
+      },
+      "categories": {
+        "fc": 100,
+        "dxj": 82,
+        "arax": 92,
+        "au": 100,
+        "sec": 95,
+        "aid": 90
+      },
+      "signals": {
+        "spec_valid": 100,
+        "info_complete": 100,
+        "refs_resolvable": 100,
+        "structural_integrity": 100,
+        "request_examples": 35,
+        "response_examples": 100,
+        "response_2xx_coverage": 75,
+        "doc_clarity": 100,
+        "schema_reuse": 100,
+        "summary_coverage": 100,
+        "description_coverage": 100,
+        "operationid_quality": 100,
+        "type_specificity": 52,
+        "error_standardization": 100,
+        "policy_presence": 100,
+        "complexity": 100,
+        "distinctiveness": 100,
+        "pagination": 100,
+        "idempotency_safety": 100,
+        "tool_calling": 100,
+        "auth_coverage": 100,
+        "auth_strength": 80,
+        "transport_security": 100,
+        "secret_hygiene": 100,
+        "descriptive_richness": 100,
+        "intent_phrasing": 100,
+        "domain_tagging": 100,
+        "registry_signals": 60
+      }
+    },
+    {
+      "name": "all-bad",
+      "label": "Every spec-level degradation at once (run with THIN_RESPONSES for completeness too).",
+      "degrades": [
+        "descriptions",
+        "operationId",
+        "examples",
+        "errorSchemas",
+        "completeness"
+      ],
+      "runtimeDriven": false,
+      "spec": "variants/all-bad.yaml",
+      "jairf": {
+        "overall": 63,
+        "grade": "C",
+        "level": 2
+      },
+      "categories": {
+        "fc": 100,
+        "dxj": 40,
+        "arax": 51,
+        "au": 86,
+        "sec": 95,
+        "aid": 72
+      },
+      "signals": {
+        "spec_valid": 100,
+        "info_complete": 100,
+        "refs_resolvable": 100,
+        "structural_integrity": 100,
+        "request_examples": 0,
+        "response_examples": 0,
+        "response_2xx_coverage": 75,
+        "doc_clarity": 26,
+        "schema_reuse": 100,
+        "summary_coverage": 100,
+        "description_coverage": 26,
+        "operationid_quality": 22,
+        "type_specificity": 55,
+        "error_standardization": 0,
+        "policy_presence": 100,
+        "complexity": 100,
+        "distinctiveness": 64,
+        "pagination": 100,
+        "idempotency_safety": 100,
+        "tool_calling": 65,
+        "auth_coverage": 100,
+        "auth_strength": 80,
+        "transport_security": 100,
+        "secret_hygiene": 100,
+        "descriptive_richness": 26,
+        "intent_phrasing": 100,
+        "domain_tagging": 100,
+        "registry_signals": 60
+      }
+    }
+  ]
+}

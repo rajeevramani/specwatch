@@ -11,15 +11,19 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint:spec": "npx --yes @redocly/cli@latest lint ../specs/gold.yaml",
-    "score:gold": "tsx ../specs/score-gold.ts"
+    "lint:variants": "npx --yes @redocly/cli@latest lint ../variants/*.yaml",
+    "score:gold": "tsx ../specs/score-gold.ts",
+    "ablate": "tsx ../ablate.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^4.17.21",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
     "@types/supertest": "^6.0.2",
     "supertest": "^7.0.0",

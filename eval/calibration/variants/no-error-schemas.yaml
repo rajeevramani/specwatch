@@ -1,0 +1,2131 @@
+openapi: 3.1.0
+info:
+  title: Calibration Orders API
+  version: 1.0.0
+  description: >
+    Thin REST CRUD API for the JAIRF calibration harness. Models a small commerce domain — customers
+    place orders, and orders contain line items. This is the hand-authored "gold" specification:
+    every operation, parameter, and schema is fully described, carries request/response examples,
+    returns a standardized problem-details error body, and documents the complete resource
+    representation on write. It is the high-quality baseline against which single-signal ablations
+    are measured.
+  contact:
+    name: Calibration Harness
+    url: https://github.com/rajeevramani/specwatch
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+externalDocs:
+  description: Calibration harness design and methodology.
+  url: https://github.com/rajeevramani/specwatch/blob/main/eval/calibration/README.md
+servers:
+  - url: https://api.calibration.local
+    description: Calibration backend. The local harness reverse-proxies this to http://localhost:8787.
+security:
+  - bearerAuth: []
+tags:
+  - name: Customers
+    description: Manage customer records.
+  - name: Orders
+    description: Manage orders placed by customers.
+  - name: LineItems
+    description: Manage the line items that belong to an order.
+  - name: System
+    description: Service health and operational endpoints.
+paths:
+  /health:
+    get:
+      tags:
+        - System
+      operationId: getHealth
+      summary: Get service health
+      description: >
+        Returns a liveness payload reporting whether the service is up and whether the
+        response-completeness toggle is active. Useful as a readiness probe before issuing other
+        requests.
+      security: []
+      responses:
+        '200':
+          description: The service is healthy.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 999
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                status: ok
+                thinResponses: false
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+  /customers:
+    get:
+      tags:
+        - Customers
+      operationId: listCustomers
+      summary: List customers
+      description: >
+        Returns the full collection of customers ordered by identifier. Supports optional
+        limit/offset pagination so agents can page through large result sets predictably.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of records to return. Omit to return the full collection.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+            description: The page size.
+            example: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of records to skip before collecting the page of results.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            description: The zero-based offset into the collection.
+            example: 0
+      responses:
+        '200':
+          description: The collection of customers.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 999
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+          content:
+            application/json:
+              schema:
+                type: array
+                description: An ordered list of customer records.
+                items:
+                  $ref: '#/components/schemas/Customer'
+              example:
+                - id: cus_001
+                  name: Ada Lovelace
+                  email: ada@example.com
+                  created_at: '2026-01-01T00:00:00.000Z'
+                - id: cus_002
+                  name: Alan Turing
+                  email: alan@example.com
+                  created_at: '2026-01-01T00:00:00.000Z'
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    post:
+      tags:
+        - Customers
+      operationId: createCustomer
+      summary: Create a customer
+      description: >
+        Creates a new customer record and returns the complete created resource, including its
+        server-assigned identifier and creation timestamp. The email address must be unique across
+        all customers.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >
+            Optional client-generated key that makes this mutating request safe to retry. Supplying
+            the same key replays the original outcome instead of applying the change twice.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      requestBody:
+        required: true
+        description: The customer to create.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerCreate'
+            example:
+              name: Edsger Dijkstra
+              email: edsger@example.com
+      responses:
+        '201':
+          description: The customer was created. The full resource is returned.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+              example:
+                id: cus_004
+                name: Edsger Dijkstra
+                email: edsger@example.com
+                created_at: '2026-06-05T12:00:00.000Z'
+        '400':
+          description: The request body or parameters were invalid.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/invalid-body
+                title: Invalid request body
+                status: 400
+                detail: name and email are required
+                code: invalid_body
+        '409':
+          description: The request conflicts with the current state, e.g. a duplicate email.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/conflict
+                title: Resource conflict
+                status: 409
+                detail: A customer with this email already exists.
+                code: conflict
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+  /customers/{customerId}:
+    get:
+      tags:
+        - Customers
+      operationId: getCustomer
+      summary: Get a customer
+      description: Returns a single customer identified by its unique customer identifier.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: The unique identifier of a customer, e.g. "cus_001".
+          schema:
+            type: string
+            description: A customer identifier.
+            example: cus_001
+      responses:
+        '200':
+          description: The requested customer.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+              example:
+                id: cus_001
+                name: Ada Lovelace
+                email: ada@example.com
+                created_at: '2026-01-01T00:00:00.000Z'
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    put:
+      tags:
+        - Customers
+      operationId: updateCustomer
+      summary: Update a customer
+      description: >
+        Replaces the mutable fields (name and email) of an existing customer and returns the
+        complete updated resource. Both fields are required; this is a full replacement rather than
+        a partial patch.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: The unique identifier of a customer, e.g. "cus_001".
+          schema:
+            type: string
+            description: A customer identifier.
+            example: cus_001
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: |
+            Optional client-generated key that makes this mutating request safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      requestBody:
+        required: true
+        description: The replacement customer fields.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerCreate'
+            example:
+              name: E. Dijkstra
+              email: edsger@example.com
+      responses:
+        '200':
+          description: The customer was updated. The full resource is returned.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+              example:
+                id: cus_001
+                name: E. Dijkstra
+                email: edsger@example.com
+                created_at: '2026-01-01T00:00:00.000Z'
+        '400':
+          description: The request body or parameters were invalid.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/invalid-body
+                title: Invalid request body
+                status: 400
+                detail: name and email are required
+                code: invalid_body
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '409':
+          description: The request conflicts with the current state, e.g. a duplicate email.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/conflict
+                title: Resource conflict
+                status: 409
+                detail: A customer with this email already exists.
+                code: conflict
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    delete:
+      tags:
+        - Customers
+      operationId: deleteCustomer
+      summary: Delete a customer
+      description: >
+        Permanently deletes a customer. Cascades to the customer's orders and their line items.
+        Returns no content on success.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: The unique identifier of a customer, e.g. "cus_001".
+          schema:
+            type: string
+            description: A customer identifier.
+            example: cus_001
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional client-generated key that makes this deletion safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      responses:
+        '204':
+          description: The customer was deleted. No body is returned.
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+  /orders:
+    get:
+      tags:
+        - Orders
+      operationId: listOrders
+      summary: List orders
+      description: >
+        Returns orders ordered by identifier. Pass customer_id to return only the orders belonging
+        to a single customer. Supports limit/offset pagination.
+      parameters:
+        - name: customer_id
+          in: query
+          required: false
+          description: Restrict the result to orders belonging to this customer identifier.
+          schema:
+            type: string
+            description: A customer identifier such as "cus_001".
+            example: cus_001
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of records to return. Omit to return the full collection.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+            description: The page size.
+            example: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of records to skip before collecting the page of results.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            description: The zero-based offset into the collection.
+            example: 0
+      responses:
+        '200':
+          description: The collection of orders.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                type: array
+                description: An ordered list of order records.
+                items:
+                  $ref: '#/components/schemas/Order'
+              example:
+                - id: ord_001
+                  customer_id: cus_001
+                  status: paid
+                  created_at: '2026-01-01T00:00:00.000Z'
+                - id: ord_002
+                  customer_id: cus_001
+                  status: pending
+                  created_at: '2026-01-01T00:00:00.000Z'
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    post:
+      tags:
+        - Orders
+      operationId: createOrder
+      summary: Create an order
+      description: >
+        Places a new order for an existing customer and returns the complete created order,
+        including its server-assigned identifier, status, and creation timestamp. The referenced
+        customer must already exist. If no status is supplied the order defaults to "pending".
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional client-generated key that makes this mutating request safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      requestBody:
+        required: true
+        description: The order to create.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreate'
+            example:
+              customer_id: cus_001
+              status: pending
+      responses:
+        '201':
+          description: The order was created. The full resource is returned.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              example:
+                id: ord_004
+                customer_id: cus_001
+                status: pending
+                created_at: '2026-06-05T12:00:00.000Z'
+        '400':
+          description: The request body or parameters were invalid.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/invalid-body
+                title: Invalid request body
+                status: 400
+                detail: name and email are required
+                code: invalid_body
+        '422':
+          description: A referenced entity does not exist, so the request cannot be processed.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/unprocessable
+                title: Unprocessable entity
+                status: 422
+                detail: customer_id does not exist
+                code: unprocessable
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+  /orders/{orderId}:
+    get:
+      tags:
+        - Orders
+      operationId: getOrder
+      summary: Get an order
+      description: Returns a single order identified by its unique order identifier.
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The unique identifier of an order, e.g. "ord_001".
+          schema:
+            type: string
+            description: An order identifier.
+            example: ord_001
+      responses:
+        '200':
+          description: The requested order.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              example:
+                id: ord_001
+                customer_id: cus_001
+                status: paid
+                created_at: '2026-01-01T00:00:00.000Z'
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    put:
+      tags:
+        - Orders
+      operationId: updateOrder
+      summary: Update an order
+      description: >
+        Updates the status of an existing order and returns the complete updated order. The status
+        must be one of the allowed lifecycle values.
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The unique identifier of an order, e.g. "ord_001".
+          schema:
+            type: string
+            description: An order identifier.
+            example: ord_001
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional client-generated key that makes this mutating request safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      requestBody:
+        required: true
+        description: The new order status.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderUpdate'
+            example:
+              status: paid
+      responses:
+        '200':
+          description: The order was updated. The full resource is returned.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              example:
+                id: ord_002
+                customer_id: cus_001
+                status: paid
+                created_at: '2026-01-01T00:00:00.000Z'
+        '400':
+          description: The request body or parameters were invalid.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/invalid-body
+                title: Invalid request body
+                status: 400
+                detail: name and email are required
+                code: invalid_body
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    delete:
+      tags:
+        - Orders
+      operationId: deleteOrder
+      summary: Delete an order
+      description: >
+        Permanently deletes an order. Cascades to the order's line items. Returns no content on
+        success.
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The unique identifier of an order, e.g. "ord_001".
+          schema:
+            type: string
+            description: An order identifier.
+            example: ord_001
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional client-generated key that makes this deletion safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      responses:
+        '204':
+          description: The order was deleted. No body is returned.
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+  /orders/{orderId}/cancel:
+    post:
+      tags:
+        - Orders
+      operationId: cancelOrder
+      summary: Cancel an order
+      description: >
+        Cancels an existing order by transitioning its status to "cancelled" and returns the
+        complete updated order. This is a convenience action equivalent to updating the status to
+        "cancelled".
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: The unique identifier of an order, e.g. "ord_001".
+          schema:
+            type: string
+            description: An order identifier.
+            example: ord_001
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional client-generated key that makes this mutating request safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      responses:
+        '200':
+          description: The order was cancelled. The full resource is returned.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              example:
+                id: ord_002
+                customer_id: cus_001
+                status: cancelled
+                created_at: '2026-01-01T00:00:00.000Z'
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+  /line-items:
+    get:
+      tags:
+        - LineItems
+      operationId: listLineItems
+      summary: List line items
+      description: >
+        Returns line items ordered by identifier. Pass order_id to return only the line items
+        belonging to a single order. Supports limit/offset pagination.
+      parameters:
+        - name: order_id
+          in: query
+          required: false
+          description: Restrict the result to line items belonging to this order identifier.
+          schema:
+            type: string
+            description: An order identifier such as "ord_001".
+            example: ord_001
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of records to return. Omit to return the full collection.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+            description: The page size.
+            example: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of records to skip before collecting the page of results.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            description: The zero-based offset into the collection.
+            example: 0
+      responses:
+        '200':
+          description: The collection of line items.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                type: array
+                description: An ordered list of line-item records.
+                items:
+                  $ref: '#/components/schemas/LineItem'
+              example:
+                - id: li_001
+                  order_id: ord_001
+                  sku: WIDGET-A
+                  quantity: 2
+                  unit_price: 1500
+                - id: li_002
+                  order_id: ord_001
+                  sku: WIDGET-B
+                  quantity: 1
+                  unit_price: 3000
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    post:
+      tags:
+        - LineItems
+      operationId: createLineItem
+      summary: Create a line item
+      description: >
+        Adds a line item to an existing order and returns the complete created line item, including
+        its server-assigned identifier. The referenced order must already exist. Quantity must be a
+        positive integer and unit_price a non-negative integer expressed in minor currency units
+        (e.g. cents).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional client-generated key that makes this mutating request safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      requestBody:
+        required: true
+        description: The line item to create.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LineItemCreate'
+            example:
+              order_id: ord_002
+              sku: WIDGET-Z
+              quantity: 3
+              unit_price: 500
+      responses:
+        '201':
+          description: The line item was created. The full resource is returned.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineItem'
+              example:
+                id: li_005
+                order_id: ord_002
+                sku: WIDGET-Z
+                quantity: 3
+                unit_price: 500
+        '400':
+          description: The request body or parameters were invalid.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/invalid-body
+                title: Invalid request body
+                status: 400
+                detail: name and email are required
+                code: invalid_body
+        '422':
+          description: A referenced entity does not exist, so the request cannot be processed.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/unprocessable
+                title: Unprocessable entity
+                status: 422
+                detail: customer_id does not exist
+                code: unprocessable
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+  /line-items/{lineItemId}:
+    get:
+      tags:
+        - LineItems
+      operationId: getLineItem
+      summary: Get a line item
+      description: Returns a single line item identified by its unique line-item identifier.
+      parameters:
+        - name: lineItemId
+          in: path
+          required: true
+          description: The unique identifier of a line item, e.g. "li_001".
+          schema:
+            type: string
+            description: A line-item identifier.
+            example: li_001
+      responses:
+        '200':
+          description: The requested line item.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineItem'
+              example:
+                id: li_001
+                order_id: ord_001
+                sku: WIDGET-A
+                quantity: 2
+                unit_price: 1500
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    put:
+      tags:
+        - LineItems
+      operationId: updateLineItem
+      summary: Update a line item
+      description: >
+        Replaces the mutable fields (sku, quantity, unit_price) of an existing line item and returns
+        the complete updated line item. This is a full replacement rather than a partial patch.
+      parameters:
+        - name: lineItemId
+          in: path
+          required: true
+          description: The unique identifier of a line item, e.g. "li_001".
+          schema:
+            type: string
+            description: A line-item identifier.
+            example: li_001
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional client-generated key that makes this mutating request safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      requestBody:
+        required: true
+        description: The replacement line-item fields.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LineItemUpdate'
+            example:
+              sku: WIDGET-Z
+              quantity: 4
+              unit_price: 550
+      responses:
+        '200':
+          description: The line item was updated. The full resource is returned.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineItem'
+              example:
+                id: li_003
+                order_id: ord_002
+                sku: WIDGET-Z
+                quantity: 4
+                unit_price: 550
+        '400':
+          description: The request body or parameters were invalid.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/invalid-body
+                title: Invalid request body
+                status: 400
+                detail: name and email are required
+                code: invalid_body
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+    delete:
+      tags:
+        - LineItems
+      operationId: deleteLineItem
+      summary: Delete a line item
+      description: Permanently deletes a line item. Returns no content on success.
+      parameters:
+        - name: lineItemId
+          in: path
+          required: true
+          description: The unique identifier of a line item, e.g. "li_001".
+          schema:
+            type: string
+            description: A line-item identifier.
+            example: li_001
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional client-generated key that makes this deletion safe to retry.
+          schema:
+            type: string
+            format: uuid
+            description: A unique idempotency key, typically a UUID.
+            example: 1f0c3a9e-2b6d-4d7a-9d1e-2a3b4c5d6e7f
+      responses:
+        '204':
+          description: The line item was deleted. No body is returned.
+        '404':
+          description: The requested resource does not exist.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/not-found
+                title: Resource not found
+                status: 404
+                detail: No resource exists with the supplied identifier.
+                code: not_found
+        '429':
+          description: The client has exceeded its rate-limit quota.
+          headers:
+            RateLimit-Limit:
+              description: The request quota for the current rate-limit window.
+              schema:
+                type: integer
+                format: int32
+                description: Maximum requests permitted in the window.
+                example: 1000
+            RateLimit-Remaining:
+              description: The number of requests remaining in the current window.
+              schema:
+                type: integer
+                format: int32
+                description: Requests remaining in the window.
+                example: 0
+            RateLimit-Reset:
+              description: Seconds until the current rate-limit window resets.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds until the window resets.
+                example: 60
+            Retry-After:
+              description: Seconds the client should wait before retrying.
+              schema:
+                type: integer
+                format: int32
+                description: Seconds to wait before retrying.
+                example: 30
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/rate-limited
+                title: Too many requests
+                status: 429
+                detail: Rate limit exceeded. Retry after the indicated delay.
+                code: rate_limited
+        '500':
+          description: An unexpected error occurred while processing the request.
+          content:
+            application/json:
+              example:
+                type: https://api.calibration.local/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected error occurred.
+                code: internal_error
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: >
+        Bearer token authentication. Supply an opaque API token in the Authorization header as
+        "Bearer <token>". The calibration backend accepts any token value; authentication is
+        documented for realism.
+  schemas:
+    Health:
+      type: object
+      description: Liveness payload reporting service status and toggle state.
+      required:
+        - status
+        - thinResponses
+      properties:
+        status:
+          type: string
+          description: Service status indicator; "ok" when the service is healthy.
+          enum:
+            - ok
+          example: ok
+        thinResponses:
+          type: boolean
+          description: Whether the response-completeness toggle is currently active.
+          example: false
+    Customer:
+      type: object
+      description: A customer who can place orders.
+      required:
+        - id
+        - name
+        - email
+        - created_at
+      properties:
+        id:
+          type: string
+          description: The server-assigned unique identifier, e.g. "cus_001".
+          example: cus_001
+        name:
+          type: string
+          description: The customer's display name.
+          example: Ada Lovelace
+        email:
+          type: string
+          format: email
+          description: The customer's email address. Unique across all customers.
+          example: ada@example.com
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp of when the customer was created.
+          example: '2026-01-01T00:00:00.000Z'
+    CustomerCreate:
+      type: object
+      description: The fields required to create or replace a customer.
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          description: The customer's display name.
+          example: Edsger Dijkstra
+        email:
+          type: string
+          format: email
+          description: The customer's email address. Must be unique across all customers.
+          example: edsger@example.com
+    Order:
+      type: object
+      description: An order placed by a customer.
+      required:
+        - id
+        - customer_id
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          description: The server-assigned unique identifier, e.g. "ord_001".
+          example: ord_001
+        customer_id:
+          type: string
+          description: The identifier of the customer who owns this order.
+          example: cus_001
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp of when the order was created.
+          example: '2026-01-01T00:00:00.000Z'
+    OrderCreate:
+      type: object
+      description: The fields required to create an order.
+      required:
+        - customer_id
+      properties:
+        customer_id:
+          type: string
+          description: The identifier of an existing customer to place the order for.
+          example: cus_001
+        status:
+          allOf:
+            - $ref: '#/components/schemas/OrderStatus'
+          description: The initial order status. Defaults to "pending" when omitted.
+          default: pending
+    OrderUpdate:
+      type: object
+      description: The fields required to update an order's status.
+      required:
+        - status
+      properties:
+        status:
+          allOf:
+            - $ref: '#/components/schemas/OrderStatus'
+          description: The new status to assign to the order.
+    OrderStatus:
+      type: string
+      description: The lifecycle status of an order.
+      enum:
+        - pending
+        - paid
+        - shipped
+        - cancelled
+      example: pending
+    LineItem:
+      type: object
+      description: A single line item belonging to an order.
+      required:
+        - id
+        - order_id
+        - sku
+        - quantity
+        - unit_price
+      properties:
+        id:
+          type: string
+          description: The server-assigned unique identifier, e.g. "li_001".
+          example: li_001
+        order_id:
+          type: string
+          description: The identifier of the order this line item belongs to.
+          example: ord_001
+        sku:
+          type: string
+          description: The stock-keeping unit of the product.
+          example: WIDGET-A
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          description: The number of units ordered. A positive integer.
+          example: 2
+        unit_price:
+          type: integer
+          format: int32
+          minimum: 0
+          description: The price per unit in minor currency units (e.g. cents).
+          example: 1500
+    LineItemCreate:
+      type: object
+      description: The fields required to create a line item.
+      required:
+        - order_id
+        - sku
+        - quantity
+        - unit_price
+      properties:
+        order_id:
+          type: string
+          description: The identifier of an existing order to add the line item to.
+          example: ord_002
+        sku:
+          type: string
+          description: The stock-keeping unit of the product.
+          example: WIDGET-Z
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          description: The number of units. A positive integer.
+          example: 3
+        unit_price:
+          type: integer
+          format: int32
+          minimum: 0
+          description: The price per unit in minor currency units (e.g. cents).
+          example: 500
+    LineItemUpdate:
+      type: object
+      description: The replaceable fields of a line item.
+      required:
+        - sku
+        - quantity
+        - unit_price
+      properties:
+        sku:
+          type: string
+          description: The stock-keeping unit of the product.
+          example: WIDGET-Z
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          description: The number of units. A positive integer.
+          example: 4
+        unit_price:
+          type: integer
+          format: int32
+          minimum: 0
+          description: The price per unit in minor currency units (e.g. cents).
+          example: 550
+    Problem:
+      type: object
+      description: >
+        A standardized problem-details error body following RFC 9457 (application/problem+json).
+        Conveys a machine-readable error type and a human-readable explanation.
+      required:
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+          description: A URI reference identifying the problem type.
+          example: https://api.calibration.local/problems/not-found
+        title:
+          type: string
+          description: A short, human-readable summary of the problem type.
+          example: Resource not found
+        status:
+          type: integer
+          format: int32
+          description: The HTTP status code for this occurrence of the problem.
+          example: 404
+        detail:
+          type: string
+          description: A human-readable explanation specific to this occurrence.
+          example: No resource exists with the supplied identifier.
+        code:
+          type: string
+          description: A stable, machine-readable error code emitted by the backend.
+          example: not_found

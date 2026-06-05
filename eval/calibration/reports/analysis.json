@@ -1,0 +1,363 @@
+{
+  "generatedAt": "2026-06-05T20:55:58.671Z",
+  "alpha": 0.05,
+  "goldVariant": "gold",
+  "variants": [
+    {
+      "variant": "gold",
+      "degrades": [],
+      "runtimeDriven": false,
+      "jairfOverall": 93,
+      "jairfGrade": "A",
+      "taskCount": 5,
+      "passCount": 5,
+      "successRate": 1,
+      "telemetry": {
+        "totalCalls": 19,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompleteness": 1,
+        "thinEndpointCount": 0
+      }
+    },
+    {
+      "variant": "no-descriptions",
+      "degrades": [
+        "descriptions"
+      ],
+      "runtimeDriven": false,
+      "jairfOverall": 84,
+      "jairfGrade": "B",
+      "taskCount": 5,
+      "passCount": 4,
+      "successRate": 0.8,
+      "telemetry": {
+        "totalCalls": 19,
+        "verificationLoops": 2,
+        "wastedRequests": 1,
+        "avgResponseCompleteness": 1,
+        "thinEndpointCount": 0
+      }
+    },
+    {
+      "variant": "bad-operationids",
+      "degrades": [
+        "operationId"
+      ],
+      "runtimeDriven": false,
+      "jairfOverall": 87,
+      "jairfGrade": "B",
+      "taskCount": 5,
+      "passCount": 3,
+      "successRate": 0.6,
+      "telemetry": {
+        "totalCalls": 19,
+        "verificationLoops": 5,
+        "wastedRequests": 4,
+        "avgResponseCompleteness": 1,
+        "thinEndpointCount": 0
+      }
+    },
+    {
+      "variant": "no-examples",
+      "degrades": [
+        "examples"
+      ],
+      "runtimeDriven": false,
+      "jairfOverall": 84,
+      "jairfGrade": "B",
+      "taskCount": 5,
+      "passCount": 5,
+      "successRate": 1,
+      "telemetry": {
+        "totalCalls": 19,
+        "verificationLoops": 1,
+        "wastedRequests": 0,
+        "avgResponseCompleteness": 1,
+        "thinEndpointCount": 0
+      }
+    },
+    {
+      "variant": "no-error-schemas",
+      "degrades": [
+        "errorSchemas"
+      ],
+      "runtimeDriven": false,
+      "jairfOverall": 88,
+      "jairfGrade": "B",
+      "taskCount": 5,
+      "passCount": 3,
+      "successRate": 0.6,
+      "telemetry": {
+        "totalCalls": 19,
+        "verificationLoops": 6,
+        "wastedRequests": 5,
+        "avgResponseCompleteness": 1,
+        "thinEndpointCount": 0
+      }
+    },
+    {
+      "variant": "thin-responses",
+      "degrades": [
+        "completeness"
+      ],
+      "runtimeDriven": true,
+      "jairfOverall": 93,
+      "jairfGrade": "A",
+      "taskCount": 5,
+      "passCount": 5,
+      "successRate": 1,
+      "telemetry": {
+        "totalCalls": 19,
+        "verificationLoops": 4,
+        "wastedRequests": 3,
+        "avgResponseCompleteness": 0.45,
+        "thinEndpointCount": 3
+      }
+    },
+    {
+      "variant": "all-bad",
+      "degrades": [
+        "descriptions",
+        "operationId",
+        "examples",
+        "errorSchemas",
+        "completeness"
+      ],
+      "runtimeDriven": false,
+      "jairfOverall": 63,
+      "jairfGrade": "C",
+      "taskCount": 5,
+      "passCount": 1,
+      "successRate": 0.2,
+      "telemetry": {
+        "totalCalls": 19,
+        "verificationLoops": 9,
+        "wastedRequests": 8,
+        "avgResponseCompleteness": 0.4,
+        "thinEndpointCount": 4
+      }
+    }
+  ],
+  "signalTable": [
+    {
+      "signal": "descriptions",
+      "variant": "no-descriptions",
+      "jairfKeys": [
+        {
+          "key": "description_coverage",
+          "gold": 100,
+          "degraded": 26,
+          "drop": 74
+        },
+        {
+          "key": "doc_clarity",
+          "gold": 100,
+          "degraded": 26,
+          "drop": 74
+        },
+        {
+          "key": "descriptive_richness",
+          "gold": 100,
+          "degraded": 26,
+          "drop": 74
+        }
+      ],
+      "runtimeDriven": false,
+      "goldSuccessRate": 1,
+      "degradedSuccessRate": 0.8,
+      "successDelta": -0.19999999999999996,
+      "taskCount": 5,
+      "goldPass": 5,
+      "degradedPass": 4,
+      "zStat": 1.0540925533894596,
+      "pValue": 0.2918405965879849,
+      "significant": false,
+      "directional": true,
+      "telemetryDelta": {
+        "verificationLoops": 2,
+        "wastedRequests": 1,
+        "avgResponseCompletenessGold": 1,
+        "avgResponseCompletenessDegraded": 1
+      }
+    },
+    {
+      "signal": "operationId",
+      "variant": "bad-operationids",
+      "jairfKeys": [
+        {
+          "key": "operationid_quality",
+          "gold": 100,
+          "degraded": 22,
+          "drop": 78
+        },
+        {
+          "key": "tool_calling",
+          "gold": 100,
+          "degraded": 65,
+          "drop": 35
+        },
+        {
+          "key": "distinctiveness",
+          "gold": 100,
+          "degraded": 64,
+          "drop": 36
+        }
+      ],
+      "runtimeDriven": false,
+      "goldSuccessRate": 1,
+      "degradedSuccessRate": 0.6,
+      "successDelta": -0.4,
+      "taskCount": 5,
+      "goldPass": 5,
+      "degradedPass": 3,
+      "zStat": 1.5811388300841898,
+      "pValue": 0.11384630482411429,
+      "significant": false,
+      "directional": true,
+      "telemetryDelta": {
+        "verificationLoops": 5,
+        "wastedRequests": 4,
+        "avgResponseCompletenessGold": 1,
+        "avgResponseCompletenessDegraded": 1
+      }
+    },
+    {
+      "signal": "examples",
+      "variant": "no-examples",
+      "jairfKeys": [
+        {
+          "key": "request_examples",
+          "gold": 35,
+          "degraded": 0,
+          "drop": 35
+        },
+        {
+          "key": "response_examples",
+          "gold": 100,
+          "degraded": 0,
+          "drop": 100
+        }
+      ],
+      "runtimeDriven": false,
+      "goldSuccessRate": 1,
+      "degradedSuccessRate": 1,
+      "successDelta": 0,
+      "taskCount": 5,
+      "goldPass": 5,
+      "degradedPass": 5,
+      "zStat": 0,
+      "pValue": 1,
+      "significant": false,
+      "directional": false,
+      "telemetryDelta": {
+        "verificationLoops": 1,
+        "wastedRequests": 0,
+        "avgResponseCompletenessGold": 1,
+        "avgResponseCompletenessDegraded": 1
+      }
+    },
+    {
+      "signal": "errorSchemas",
+      "variant": "no-error-schemas",
+      "jairfKeys": [
+        {
+          "key": "error_standardization",
+          "gold": 100,
+          "degraded": 0,
+          "drop": 100
+        }
+      ],
+      "runtimeDriven": false,
+      "goldSuccessRate": 1,
+      "degradedSuccessRate": 0.6,
+      "successDelta": -0.4,
+      "taskCount": 5,
+      "goldPass": 5,
+      "degradedPass": 3,
+      "zStat": 1.5811388300841898,
+      "pValue": 0.11384630482411429,
+      "significant": false,
+      "directional": true,
+      "telemetryDelta": {
+        "verificationLoops": 6,
+        "wastedRequests": 5,
+        "avgResponseCompletenessGold": 1,
+        "avgResponseCompletenessDegraded": 1
+      }
+    },
+    {
+      "signal": "completeness",
+      "variant": "thin-responses",
+      "jairfKeys": [],
+      "runtimeDriven": true,
+      "goldSuccessRate": 1,
+      "degradedSuccessRate": 1,
+      "successDelta": 0,
+      "taskCount": 5,
+      "goldPass": 5,
+      "degradedPass": 5,
+      "zStat": 0,
+      "pValue": 1,
+      "significant": false,
+      "directional": false,
+      "telemetryDelta": {
+        "verificationLoops": 4,
+        "wastedRequests": 3,
+        "avgResponseCompletenessGold": 1,
+        "avgResponseCompletenessDegraded": 0.45
+      }
+    }
+  ],
+  "significantSignals": [],
+  "directionalMovers": [
+    {
+      "signal": "operationId",
+      "successDelta": -0.4
+    },
+    {
+      "signal": "errorSchemas",
+      "successDelta": -0.4
+    },
+    {
+      "signal": "descriptions",
+      "successDelta": -0.19999999999999996
+    }
+  ],
+  "prediction": {
+    "staticOnly": {
+      "rSquared": 0.6720003886136208,
+      "pearson": 0.8197562983067717,
+      "n": 7
+    },
+    "staticPlusRuntime": {
+      "rSquared": 0.49392535567624024,
+      "pearson": 0.702798232550595,
+      "n": 7
+    },
+    "rSquaredGain": -0.17807503293738053,
+    "verdict": "Static JAIRF already captures most of the predictable success variance (R^2 0.672); specwatch telemetry adds -0.178 R^2 — marginal on this dataset."
+  },
+  "sources": {
+    "manifest": "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/variants/manifest.json",
+    "runs": [
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/all-bad.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/bad-operationids.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/gold.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-descriptions.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-error-schemas.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-examples.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/thin-responses.json"
+    ],
+    "captures": [
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/all-bad.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/bad-operationids.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/gold.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-descriptions.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-error-schemas.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-examples.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/thin-responses.specwatch.json"
+    ]
+  },
+  "notes": []
+}

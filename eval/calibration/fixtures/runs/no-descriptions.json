@@ -1,0 +1,64 @@
+{
+  "generatedAt": "2026-06-06T00:00:00.000Z",
+  "synthetic": true,
+  "note": "SYNTHETIC fixture (specwatch-51h). Illustrative success gradient, not a measured live run.",
+  "variant": "no-descriptions",
+  "agent": "fixture:synthetic",
+  "model": "fixture",
+  "live": false,
+  "thinResponses": false,
+  "passCount": 4,
+  "failCount": 1,
+  "records": [
+    {
+      "variant": "no-descriptions",
+      "taskId": "t1_onboard_and_cancel",
+      "success": true,
+      "detail": "synthetic: ground-truth end-state satisfied",
+      "callCount": 3,
+      "steps": 4,
+      "truncated": false,
+      "transcript": []
+    },
+    {
+      "variant": "no-descriptions",
+      "taskId": "t2_place_order_and_pay",
+      "success": false,
+      "detail": "synthetic: end-state assertion failed",
+      "callCount": 4,
+      "steps": 5,
+      "truncated": false,
+      "transcript": []
+    },
+    {
+      "variant": "no-descriptions",
+      "taskId": "t3_fulfil_pending_order",
+      "success": true,
+      "detail": "synthetic: ground-truth end-state satisfied",
+      "callCount": 5,
+      "steps": 4,
+      "truncated": false,
+      "transcript": []
+    },
+    {
+      "variant": "no-descriptions",
+      "taskId": "t4_correct_line_item_quantity",
+      "success": true,
+      "detail": "synthetic: ground-truth end-state satisfied",
+      "callCount": 3,
+      "steps": 5,
+      "truncated": false,
+      "transcript": []
+    },
+    {
+      "variant": "no-descriptions",
+      "taskId": "t5_onboard_rename_offboard",
+      "success": true,
+      "detail": "synthetic: ground-truth end-state satisfied",
+      "callCount": 4,
+      "steps": 4,
+      "truncated": false,
+      "transcript": []
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-06-06T00:00:00.000Z",
+  "synthetic": true,
+  "source": "replay",
+  "consumer": "agent",
+  "variant": {
+    "variant": "bad-operationids",
+    "agent": "fixture:synthetic",
+    "thinResponses": false,
+    "taskCount": 5,
+    "totalCalls": 19,
+    "totalVerificationLoops": 5,
+    "totalWastedRequests": 4,
+    "avgResponseCompleteness": 1,
+    "tasks": [
+      {
+        "variant": "bad-operationids",
+        "taskId": "t1_onboard_and_cancel",
+        "success": true,
+        "callsPerTask": 3,
+        "verificationLoops": 5,
+        "wastedRequests": 4,
+        "responseCompleteness": 1,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      },
+      {
+        "variant": "bad-operationids",
+        "taskId": "t2_place_order_and_pay",
+        "success": false,
+        "callsPerTask": 4,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "responseCompleteness": 1,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      },
+      {
+        "variant": "bad-operationids",
+        "taskId": "t3_fulfil_pending_order",
+        "success": true,
+        "callsPerTask": 5,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "responseCompleteness": 1,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      },
+      {
+        "variant": "bad-operationids",
+        "taskId": "t4_correct_line_item_quantity",
+        "success": true,
+        "callsPerTask": 3,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "responseCompleteness": 1,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      },
+      {
+        "variant": "bad-operationids",
+        "taskId": "t5_onboard_rename_offboard",
+        "success": false,
+        "callsPerTask": 4,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "responseCompleteness": 1,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      }
+    ]
+  }
+}

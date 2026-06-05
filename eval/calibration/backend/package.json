@@ -16,7 +16,10 @@
     "ablate": "tsx ../ablate.ts",
     "check:tasks": "tsx ../tasks/check.ts",
     "calib:run": "tsx ../runner/cli.ts",
-    "calib:run:live": "tsx ../runner/cli.ts --live"
+    "calib:run:live": "tsx ../runner/cli.ts --live",
+    "calib:fixtures": "tsx ../fixtures/make-fixtures.ts",
+    "calib:analyze": "tsx ../analyze.ts",
+    "calib:analyze:fixtures": "tsx ../analyze.ts --runs ../fixtures/runs --out-dir ../reports"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

@@ -11,5 +11,11 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "../runner/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "../runner/**/*.ts",
+    "../analyze.ts",
+    "../fixtures/**/*.ts"
+  ]
 }

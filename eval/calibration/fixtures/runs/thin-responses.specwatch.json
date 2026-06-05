@@ -1,0 +1,77 @@
+{
+  "generatedAt": "2026-06-06T00:00:00.000Z",
+  "synthetic": true,
+  "source": "replay",
+  "consumer": "agent",
+  "variant": {
+    "variant": "thin-responses",
+    "agent": "fixture:synthetic",
+    "thinResponses": true,
+    "taskCount": 5,
+    "totalCalls": 19,
+    "totalVerificationLoops": 4,
+    "totalWastedRequests": 3,
+    "avgResponseCompleteness": 0.45,
+    "tasks": [
+      {
+        "variant": "thin-responses",
+        "taskId": "t1_onboard_and_cancel",
+        "success": true,
+        "callsPerTask": 3,
+        "verificationLoops": 4,
+        "wastedRequests": 3,
+        "responseCompleteness": 0.45,
+        "thinEndpoints": [
+          "PUT /e0",
+          "PUT /e1",
+          "PUT /e2"
+        ],
+        "commonNextSteps": {}
+      },
+      {
+        "variant": "thin-responses",
+        "taskId": "t2_place_order_and_pay",
+        "success": true,
+        "callsPerTask": 4,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "responseCompleteness": 0.45,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      },
+      {
+        "variant": "thin-responses",
+        "taskId": "t3_fulfil_pending_order",
+        "success": true,
+        "callsPerTask": 5,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "responseCompleteness": 0.45,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      },
+      {
+        "variant": "thin-responses",
+        "taskId": "t4_correct_line_item_quantity",
+        "success": true,
+        "callsPerTask": 3,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "responseCompleteness": 0.45,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      },
+      {
+        "variant": "thin-responses",
+        "taskId": "t5_onboard_rename_offboard",
+        "success": true,
+        "callsPerTask": 4,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "responseCompleteness": 0.45,
+        "thinEndpoints": [],
+        "commonNextSteps": {}
+      }
+    ]
+  }
+}

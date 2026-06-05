@@ -21,6 +21,7 @@ import { parseSpec } from '../packages/agentready-scoring/src/index.js';
 import { runVariant, DEFAULT_MODEL, SYSTEM_PROMPT, type VariantRunResult } from './runner.js';
 import { MockLlmClient, AnthropicLlmClient, type LlmClient } from './llm.js';
 import { GOLD_MOCK_PLANS } from './mock-plans.js';
+import { captureVariant } from './capture.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CALIB_ROOT = resolve(here, '..');
@@ -139,6 +140,17 @@ async function main(): Promise<void> {
 
   console.log(
     `\n[calib:run] ${result.passCount}/${result.records.length} tasks passed -> ${outPath}`,
+  );
+
+  // Specwatch capture (specwatch-13a): replay the captured agent traffic through
+  // specwatch's own analysis (consumer=agent) and emit runtime telemetry keyed by
+  // variant+task for the analysis join.
+  const capture = captureVariant(result);
+  const capturePath = resolve(OUT_DIR, `${args.variant}.specwatch.json`);
+  writeFileSync(capturePath, JSON.stringify(capture, null, 2) + '\n', 'utf8');
+  console.log(
+    `[calib:run] specwatch capture: ${capture.variant.totalCalls} calls, ` +
+      `${capture.variant.totalVerificationLoops} verification loops -> ${capturePath}`,
   );
 }
 

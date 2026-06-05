@@ -57,6 +57,18 @@ export interface TranscriptToolCall {
   /** Response body as text (truncated for storage sanity). */
   response: string;
   isError: boolean;
+  /**
+   * HTTP method the tool resolves to (e.g. `POST`), or null for an unknown tool.
+   * Carried so specwatch's traffic analysis can be fed the captured calls without
+   * re-deriving routing from the spec.
+   */
+  httpMethod: string | null;
+  /** Raw request path incl. filled placeholders + query (e.g. `/orders/abc`). */
+  rawPath: string | null;
+  /** Spec path template, used as the normalized path (e.g. `/orders/{orderId}`). */
+  normalizedPath: string | null;
+  /** ISO 8601 timestamp captured immediately after the response returned. */
+  capturedAt: string;
 }
 
 /** One transcript entry. */
@@ -161,10 +173,15 @@ async function executeTool(
       status: null,
       response: `No tool named "${use.name}" exists. Available tools: ${[...toolsByName.keys()].join(', ')}`,
       isError: true,
+      httpMethod: null,
+      rawPath: null,
+      normalizedPath: null,
+      capturedAt: new Date().toISOString(),
     };
   }
 
-  const url = baseUrl + fillPath(tool._http.pathTemplate, use.input, tool);
+  const requestPath = fillPath(tool._http.pathTemplate, use.input, tool);
+  const url = baseUrl + requestPath;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   for (const [name, loc] of Object.entries(tool._http.paramLocations)) {
     if (loc === 'header' && use.input[name] !== undefined && use.input[name] !== null) {
@@ -191,6 +208,10 @@ async function executeTool(
       status: res.status,
       response: text.length > 4000 ? text.slice(0, 4000) + '…' : text,
       isError: res.status >= 400,
+      httpMethod: tool._http.method,
+      rawPath: requestPath,
+      normalizedPath: tool._http.pathTemplate,
+      capturedAt: new Date().toISOString(),
     };
   } catch (e) {
     return {
@@ -200,6 +221,10 @@ async function executeTool(
       status: null,
       response: `Request failed: ${(e as Error).message}`,
       isError: true,
+      httpMethod: tool._http.method,
+      rawPath: requestPath,
+      normalizedPath: tool._http.pathTemplate,
+      capturedAt: new Date().toISOString(),
     };
   }
 }

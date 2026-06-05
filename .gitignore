@@ -20,3 +20,5 @@ adapters/
 
 # Eval run artifacts
 mockbank-openapi.yaml
+# Local working docs (runbooks, spikes) — not product docs
+.local/

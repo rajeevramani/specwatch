@@ -17,6 +17,7 @@
     "check:tasks": "tsx ../tasks/check.ts",
     "calib:run": "tsx ../runner/cli.ts",
     "calib:run:live": "tsx ../runner/cli.ts --live",
+    "calib:run:openrouter": "tsx ../runner/cli.ts --live --provider openrouter",
     "calib:fixtures": "tsx ../fixtures/make-fixtures.ts",
     "calib:analyze": "tsx ../analyze.ts",
     "calib:analyze:fixtures": "tsx ../analyze.ts --runs ../fixtures/runs --out-dir ../reports"

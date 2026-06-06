@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { parseSpec } from '../packages/agentready-scoring/src/index.js';
 import { runVariant, DEFAULT_MODEL, SYSTEM_PROMPT, type VariantRunResult } from './runner.js';
-import { MockLlmClient, AnthropicLlmClient, type LlmClient } from './llm.js';
+import { MockLlmClient, AnthropicLlmClient, OpenRouterLlmClient, type LlmClient } from './llm.js';
 import { GOLD_MOCK_PLANS, MOCK_OP_ROUTES } from './mock-plans.js';
 import { captureVariant } from './capture.js';
 
@@ -29,21 +29,28 @@ const VARIANTS_DIR = resolve(CALIB_ROOT, 'variants');
 const GOLD_SPEC = resolve(CALIB_ROOT, 'specs/gold.yaml');
 const OUT_DIR = resolve(CALIB_ROOT, '.runs');
 
+type Provider = 'anthropic' | 'openrouter';
+
+/** Default OpenRouter model when --provider openrouter is set without --model. */
+const DEFAULT_OPENROUTER_MODEL = 'anthropic/claude-sonnet-4.5';
+
 interface CliArgs {
   variant: string;
   live: boolean;
+  provider: Provider;
   thinResponses?: boolean;
-  model: string;
+  model?: string;
   maxSteps: number;
   out?: string;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { variant: 'gold', live: false, model: DEFAULT_MODEL, maxSteps: 25 };
+  const args: CliArgs = { variant: 'gold', live: false, provider: 'anthropic', maxSteps: 25 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--variant') args.variant = argv[++i];
     else if (a === '--live') args.live = true;
+    else if (a === '--provider') args.provider = argv[++i] as Provider;
     else if (a === '--thin-responses') args.thinResponses = true;
     else if (a === '--no-thin-responses') args.thinResponses = false;
     else if (a === '--model') args.model = argv[++i];
@@ -51,6 +58,12 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === '--out') args.out = argv[++i];
   }
   return args;
+}
+
+/** Resolve the pinned model for the chosen provider. */
+function resolveModel(args: CliArgs): string {
+  if (args.model) return args.model;
+  return args.provider === 'openrouter' ? DEFAULT_OPENROUTER_MODEL : DEFAULT_MODEL;
 }
 
 /** Load + parse the spec the agent sees for a variant. */
@@ -81,8 +94,20 @@ function manifestEntry(variant: string): any | undefined {
  * throws so we never make (or fail) a paid call by accident.
  */
 function makeClient(args: CliArgs): LlmClient {
+  const model = resolveModel(args);
   if (!args.live) {
-    return new MockLlmClient(GOLD_MOCK_PLANS, `mock:${args.model}`);
+    return new MockLlmClient(GOLD_MOCK_PLANS, `mock:${model}`);
+  }
+  if (args.provider === 'openrouter') {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        '--live --provider openrouter requires OPENROUTER_API_KEY to be set. ' +
+          'Refusing to proceed without a key.',
+      );
+    }
+    // temperature: 0 for determinism (OpenAI format accepts it).
+    return new OpenRouterLlmClient({ model, apiKey, temperature: 0 });
   }
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -91,7 +116,7 @@ function makeClient(args: CliArgs): LlmClient {
         'Run without --live to use the deterministic mock agent (no API calls).',
     );
   }
-  return new AnthropicLlmClient({ model: args.model, apiKey, temperature: 0, sendTemperature: false });
+  return new AnthropicLlmClient({ model, apiKey, temperature: 0, sendTemperature: false });
 }
 
 async function main(): Promise<void> {
@@ -99,11 +124,12 @@ async function main(): Promise<void> {
   const spec = loadVariantSpec(args.variant);
   const entry = manifestEntry(args.variant);
   const thinResponses = args.thinResponses ?? Boolean(entry?.runtimeDriven);
+  const model = resolveModel(args);
   const client = makeClient(args);
 
   console.log(
     `[calib:run] variant=${args.variant} agent=${client.id} ` +
-      `mode=${args.live ? 'LIVE' : 'mock'} thinResponses=${thinResponses}`,
+      `mode=${args.live ? `LIVE/${args.provider}` : 'mock'} thinResponses=${thinResponses}`,
   );
 
   const result: VariantRunResult = await runVariant({
@@ -131,7 +157,8 @@ async function main(): Promise<void> {
     generatedAt: new Date().toISOString(),
     variant: result.variant,
     agent: result.agent,
-    model: args.model,
+    model,
+    provider: args.provider,
     live: args.live,
     systemPrompt: SYSTEM_PROMPT,
     thinResponses: result.thinResponses,

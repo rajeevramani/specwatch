@@ -290,3 +290,132 @@ function anthropicMessageToResponse(message: any): LlmResponse {
   const stopReason = message.stop_reason === 'tool_use' || toolUses.length > 0 ? 'tool_use' : 'end_turn';
   return { stopReason, text, toolUses };
 }
+
+// ---------------------------------------------------------------------------
+// OpenRouter client — OpenAI-compatible /chat/completions, raw fetch.
+// ---------------------------------------------------------------------------
+//
+// OpenRouter speaks the OpenAI chat-completions wire format, NOT Anthropic's
+// Messages API — so this client maps our LlmRequest (system / tools / turns) to
+// OpenAI shapes (messages[], tools[] of type "function", tool_calls) and parses
+// the reply back. No SDK dependency: raw `fetch` against the OpenAI-compatible
+// endpoint keeps the runner's dep surface unchanged. The model is pinned (agent
+// is a constant across variants); `temperature: 0` is sent for determinism (the
+// OpenAI format accepts it, unlike Opus 4.8's Messages API).
+//
+// The mapping helpers are exported pure functions so they can be unit-tested
+// without a network call.
+
+/** Map system + our turns to OpenAI `messages[]`. */
+export function toOpenAIMessages(system: string, turns: LlmTurn[]): Array<Record<string, unknown>> {
+  const messages: Array<Record<string, unknown>> = [{ role: 'system', content: system }];
+  for (const t of turns) {
+    if (t.role === 'user') {
+      messages.push({ role: 'user', content: t.text });
+    } else if (t.role === 'assistant') {
+      const msg: Record<string, unknown> = { role: 'assistant', content: t.text ?? '' };
+      if (t.toolUses.length > 0) {
+        msg.tool_calls = t.toolUses.map((u) => ({
+          id: u.id,
+          type: 'function',
+          function: { name: u.name, arguments: JSON.stringify(u.input ?? {}) },
+        }));
+      }
+      messages.push(msg);
+    } else {
+      // tool results -> one `tool` message per result, keyed by tool_call_id.
+      for (const r of t.results) {
+        messages.push({ role: 'tool', tool_call_id: r.toolUseId, content: r.content });
+      }
+    }
+  }
+  return messages;
+}
+
+/** Map our wire tools to OpenAI `tools[]` (type: "function"). */
+export function toOpenAITools(tools: WireTool[]): Array<Record<string, unknown>> {
+  return tools.map((t) => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.input_schema },
+  }));
+}
+
+/** Parse an OpenAI `choices[0].message` into our {@link LlmResponse}. */
+export function openAIMessageToResponse(message: any): LlmResponse {
+  const text: string = typeof message?.content === 'string' ? message.content : '';
+  const toolUses: LlmToolUse[] = [];
+  for (const tc of message?.tool_calls ?? []) {
+    let input: Record<string, unknown> = {};
+    try {
+      input = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {};
+    } catch {
+      input = {};
+    }
+    toolUses.push({ id: tc.id, name: tc.function?.name, input });
+  }
+  return { stopReason: toolUses.length > 0 ? 'tool_use' : 'end_turn', text, toolUses };
+}
+
+export interface OpenRouterClientOptions {
+  /** Pinned OpenRouter model id, e.g. "anthropic/claude-sonnet-4.5". Constant across variants. */
+  model: string;
+  apiKey?: string;
+  temperature?: number;
+  maxTokens?: number;
+  baseUrl?: string;
+}
+
+export class OpenRouterLlmClient implements LlmClient {
+  readonly id: string;
+  private readonly opts: Required<Omit<OpenRouterClientOptions, 'apiKey'>> & { apiKey: string };
+
+  constructor(opts: OpenRouterClientOptions) {
+    const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
+    if (!apiKey) {
+      throw new Error(
+        'OpenRouter requires OPENROUTER_API_KEY (pass apiKey or set the env var). ' +
+          'Refusing to proceed without a key.',
+      );
+    }
+    this.opts = {
+      model: opts.model,
+      temperature: opts.temperature ?? 0,
+      maxTokens: opts.maxTokens ?? 4096,
+      baseUrl: opts.baseUrl ?? 'https://openrouter.ai/api/v1',
+      apiKey,
+    };
+    this.id = `openrouter:${this.opts.model}`;
+  }
+
+  async step(req: LlmRequest): Promise<LlmResponse> {
+    const body = {
+      model: this.opts.model,
+      temperature: this.opts.temperature,
+      max_tokens: this.opts.maxTokens,
+      messages: toOpenAIMessages(req.system, req.turns),
+      tools: toOpenAITools(req.tools),
+      tool_choice: 'auto',
+    };
+    const res = await fetch(`${this.opts.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${this.opts.apiKey}`,
+        // OpenRouter attribution headers (optional but recommended).
+        'HTTP-Referer': 'https://github.com/specwatch/calibration',
+        'X-Title': 'specwatch-calibration',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`OpenRouter ${res.status} ${res.statusText}: ${text.slice(0, 500)}`);
+    }
+    const data: any = await res.json();
+    const message = data?.choices?.[0]?.message;
+    if (!message) {
+      throw new Error(`OpenRouter response had no choices[0].message: ${JSON.stringify(data).slice(0, 500)}`);
+    }
+    return openAIMessageToResponse(message);
+  }
+}

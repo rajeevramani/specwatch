@@ -240,6 +240,147 @@ export const TASKS: CalibrationTask[] = [
   },
 ];
 
+// ===========================================================================
+// GOAL task set (specwatch-ewk).
+//
+// Same backend, same ground-truth assertions — but the prompts are framed as a
+// real shopping-assistant would receive them: domain intent with INDIRECT action
+// verbs ("call it off", "move it through to dispatched", "erase it") instead of
+// naming the operation. The concrete DATA the assertion checks (emails, SKUs,
+// quantities, prices) is still given — the agent can't invent it — but the agent
+// must use the SPEC (tool descriptions / operationIds) to map intent -> which
+// operation + which fields. That is where a degraded spec should start costing
+// success, unlike the mechanical TASKS where the prompt already is the procedure.
+//
+// Run with the persona system prompt: `--system assistant --tasks goal`.
+// ===========================================================================
+
+/** Goal-framed prompt per existing mechanical task id (reuses that task's assert). */
+const GOAL_PROMPTS: Record<string, string> = {
+  t1_onboard_and_cancel:
+    'Margaret Hamilton (margaret.hamilton@calib.test) is a brand-new shopper. Get her ' +
+    'registered and start an order for her — but she immediately has second thoughts, so ' +
+    'make sure that order is called off and will not be fulfilled.',
+  t2_place_order_and_pay:
+    'Set up Katherine Johnson (katherine.johnson@calib.test) as a customer and ring up her ' +
+    'basket: 3 of CALIB-ALPHA at 1000 each, and 1 of CALIB-BETA at 4999. She is paying now, ' +
+    'so the order should end up settled.',
+  t3_fulfil_pending_order:
+    'Ada Lovelace (ada@example.com) has an order sitting unpaid in the queue. She has now ' +
+    'paid for it and it is ready to leave the warehouse — move that order all the way through ' +
+    'to dispatched.',
+  t4_correct_line_item_quantity:
+    'On order ord_001 the WIDGET-A line was entered with the wrong count. Fix it so that line ' +
+    'reflects 7 units. The price per unit (1500) is correct — leave it alone.',
+  t5_onboard_rename_offboard:
+    "Two shoppers signed up: 'Temp Keeper' (keep.user@calib.test) and 'Temp Reject' " +
+    "(reject.user@calib.test). The first one's name should actually be 'Permanent Keeper' — " +
+    'correct it, keeping the same email. The second signed up by mistake and wants their ' +
+    'account removed from the system entirely.',
+};
+
+/** The mechanical tasks, re-framed as goal-level prompts (same asserts/steps). */
+const GOAL_REFRAMED: CalibrationTask[] = TASKS.map((t) => {
+  const prompt = GOAL_PROMPTS[t.id];
+  if (!prompt) throw new Error(`no goal prompt for task ${t.id}`);
+  return { ...t, prompt };
+});
+
+/** Extra goal-only tasks (new asserts) — added for statistical power. */
+const GOAL_EXTRA: CalibrationTask[] = [
+  {
+    id: 't6_reserve_unpaid_order',
+    title: 'Reserve an order for a new customer, leave it unpaid',
+    prompt:
+      'Grace Hopper (grace.hopper@calib.test) is a new customer who wants to reserve 2 units ' +
+      'of COMPILER-9 at 500 each. Register her and put the order together, but she will pay ' +
+      'later — leave it open and unpaid for now.',
+    steps: [
+      'POST /customers {name:"Grace Hopper", email:"grace.hopper@calib.test"}',
+      'POST /orders {customer_id:<new customer id>}',
+      'POST /line-items {order_id:<new order id>, sku:"COMPILER-9", quantity:2, unit_price:500}',
+    ],
+    assert(truth) {
+      const id = this.id;
+      const matches = customersByEmail(truth, 'grace.hopper@calib.test');
+      if (matches.length !== 1) return fail(id, `expected 1 Grace Hopper customer, found ${matches.length}`);
+      const orders = ordersForCustomer(truth, matches[0].id);
+      if (orders.length !== 1) return fail(id, `expected exactly 1 order, found ${orders.length}`);
+      if (orders[0].status !== 'pending') {
+        return fail(id, `order status is "${orders[0].status}", expected it left "pending"/unpaid`);
+      }
+      const items = lineItemsForOrder(truth, orders[0].id);
+      const c9 = items.find((li) => li.sku === 'COMPILER-9');
+      if (items.length !== 1 || !c9) {
+        return fail(id, `expected exactly 1 COMPILER-9 line-item, found ${items.map((li) => li.sku).join(',')}`);
+      }
+      if (c9.quantity !== 2 || c9.unit_price !== 500) {
+        return fail(id, `COMPILER-9 is qty ${c9.quantity}@${c9.unit_price}, expected 2@500`);
+      }
+      return pass(id, 'unpaid order with the COMPILER-9 line reserved for the new customer');
+    },
+  },
+  {
+    id: 't7_erase_mistaken_order',
+    title: 'Erase a mistakenly-created seeded order entirely',
+    prompt:
+      'Order ord_002 was opened by mistake and needs to be erased from the records ' +
+      'completely — not merely called off, but actually removed.',
+    steps: [
+      'GET /orders/ord_002 to confirm it exists',
+      'DELETE /orders/ord_002',
+    ],
+    assert(truth) {
+      const id = this.id;
+      const still = truth.orders.find((o) => o.id === 'ord_002');
+      if (still) {
+        return fail(id, `ord_002 still exists with status "${still.status}" — it was not removed (cancel != delete)`);
+      }
+      return pass(id, 'ord_002 was removed from the records entirely');
+    },
+  },
+  {
+    id: 't8_record_completed_sale',
+    title: 'Record a completed, fully-paid sale for a new customer',
+    prompt:
+      'Record a completed sale for Alan Turing (alan.turing@calib.test): he bought 1 unit of ' +
+      'ENIGMA at 9999 and has already paid in full. Set up the customer and the order so they ' +
+      'reflect that fully-paid purchase.',
+    steps: [
+      'POST /customers {name:"Alan Turing", email:"alan.turing@calib.test"}',
+      'POST /orders {customer_id:<new customer id>}',
+      'POST /line-items {order_id:<new order id>, sku:"ENIGMA", quantity:1, unit_price:9999}',
+      'PUT /orders/<new order id> {status:"paid"}',
+    ],
+    assert(truth) {
+      const id = this.id;
+      const matches = customersByEmail(truth, 'alan.turing@calib.test');
+      if (matches.length !== 1) return fail(id, `expected 1 Alan Turing customer, found ${matches.length}`);
+      const orders = ordersForCustomer(truth, matches[0].id);
+      if (orders.length !== 1) return fail(id, `expected exactly 1 order, found ${orders.length}`);
+      if (orders[0].status !== 'paid') {
+        return fail(id, `order status is "${orders[0].status}", expected "paid"`);
+      }
+      const items = lineItemsForOrder(truth, orders[0].id);
+      const enigma = items.find((li) => li.sku === 'ENIGMA');
+      if (items.length !== 1 || !enigma) {
+        return fail(id, `expected exactly 1 ENIGMA line-item, found ${items.map((li) => li.sku).join(',')}`);
+      }
+      if (enigma.quantity !== 1 || enigma.unit_price !== 9999) {
+        return fail(id, `ENIGMA is qty ${enigma.quantity}@${enigma.unit_price}, expected 1@9999`);
+      }
+      return pass(id, 'fully-paid order with the ENIGMA line recorded for the new customer');
+    },
+  },
+];
+
+/**
+ * The goal task set: the 5 mechanical tasks re-framed as domain intents + 3 extra
+ * goal-only tasks (8 total). Same ground-truth assertions; prompts force the agent
+ * to lean on the spec to map intent -> operations. Used by `--tasks goal`.
+ */
+export const GOAL_TASKS: CalibrationTask[] = [...GOAL_REFRAMED, ...GOAL_EXTRA];
+
 /** Look up a task by id; throws if unknown. */
 export function getTask(taskId: string): CalibrationTask {
   const t = TASKS.find((task) => task.id === taskId);

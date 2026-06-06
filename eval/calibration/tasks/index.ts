@@ -1,5 +1,5 @@
 export * from './types.js';
-export { TASKS, getTask } from './tasks.js';
+export { TASKS, GOAL_TASKS, getTask } from './tasks.js';
 export {
   checkTasks,
   checkTask,

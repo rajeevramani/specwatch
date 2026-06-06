@@ -18,9 +18,16 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { parseSpec } from '../packages/agentready-scoring/src/index.js';
-import { runVariant, DEFAULT_MODEL, SYSTEM_PROMPT, type VariantRunResult } from './runner.js';
+import {
+  runVariant,
+  DEFAULT_MODEL,
+  SYSTEM_PROMPT,
+  PERSONA_SYSTEM_PROMPT,
+  type VariantRunResult,
+} from './runner.js';
 import { MockLlmClient, AnthropicLlmClient, OpenRouterLlmClient, type LlmClient } from './llm.js';
 import { GOLD_MOCK_PLANS, MOCK_OP_ROUTES } from './mock-plans.js';
+import { TASKS, GOAL_TASKS } from '../tasks/index.js';
 import { captureVariant } from './capture.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -34,10 +41,15 @@ type Provider = 'anthropic' | 'openrouter';
 /** Default OpenRouter model when --provider openrouter is set without --model. */
 const DEFAULT_OPENROUTER_MODEL = 'anthropic/claude-sonnet-4.5';
 
+type SystemKind = 'mechanic' | 'assistant';
+type TaskSet = 'mechanic' | 'goal';
+
 interface CliArgs {
   variant: string;
   live: boolean;
   provider: Provider;
+  system: SystemKind;
+  taskSet: TaskSet;
   thinResponses?: boolean;
   model?: string;
   maxSteps: number;
@@ -45,12 +57,21 @@ interface CliArgs {
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { variant: 'gold', live: false, provider: 'anthropic', maxSteps: 25 };
+  const args: CliArgs = {
+    variant: 'gold',
+    live: false,
+    provider: 'anthropic',
+    system: 'mechanic',
+    taskSet: 'mechanic',
+    maxSteps: 25,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--variant') args.variant = argv[++i];
     else if (a === '--live') args.live = true;
     else if (a === '--provider') args.provider = argv[++i] as Provider;
+    else if (a === '--system') args.system = argv[++i] as SystemKind;
+    else if (a === '--tasks') args.taskSet = argv[++i] as TaskSet;
     else if (a === '--thin-responses') args.thinResponses = true;
     else if (a === '--no-thin-responses') args.thinResponses = false;
     else if (a === '--model') args.model = argv[++i];
@@ -126,10 +147,13 @@ async function main(): Promise<void> {
   const thinResponses = args.thinResponses ?? Boolean(entry?.runtimeDriven);
   const model = resolveModel(args);
   const client = makeClient(args);
+  const system = args.system === 'assistant' ? PERSONA_SYSTEM_PROMPT : SYSTEM_PROMPT;
+  const tasks = args.taskSet === 'goal' ? GOAL_TASKS : TASKS;
 
   console.log(
     `[calib:run] variant=${args.variant} agent=${client.id} ` +
-      `mode=${args.live ? `LIVE/${args.provider}` : 'mock'} thinResponses=${thinResponses}`,
+      `mode=${args.live ? `LIVE/${args.provider}` : 'mock'} system=${args.system} ` +
+      `tasks=${args.taskSet}(${tasks.length}) thinResponses=${thinResponses}`,
   );
 
   const result: VariantRunResult = await runVariant({
@@ -138,6 +162,8 @@ async function main(): Promise<void> {
     client,
     thinResponses,
     maxSteps: args.maxSteps,
+    system,
+    tasks,
     // Mock emits gold operationIds; alias them by route so a variant that mangled
     // the ids still runs end-to-end. Live agent gets no aliases (degradation real).
     nameAliases: args.live ? undefined : MOCK_OP_ROUTES,
@@ -160,7 +186,9 @@ async function main(): Promise<void> {
     model,
     provider: args.provider,
     live: args.live,
-    systemPrompt: SYSTEM_PROMPT,
+    system: args.system,
+    taskSet: args.taskSet,
+    systemPrompt: system,
     thinResponses: result.thinResponses,
     passCount: result.passCount,
     failCount: result.failCount,

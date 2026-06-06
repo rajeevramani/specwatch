@@ -22,7 +22,7 @@
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../backend/src/app.js';
-import { TASKS, checkTask, fetchTruth } from '../tasks/index.js';
+import { TASKS, fetchTruth } from '../tasks/index.js';
 import type { CalibrationTask, TaskResult } from '../tasks/index.js';
 import { specToTools, toWireTools, routeKeyOf, type AgentTool } from './tools.js';
 import type {
@@ -36,7 +36,12 @@ import type {
 /** Default fixed agent identity. Pinned model id; agent is a constant. */
 export const DEFAULT_MODEL = 'claude-opus-4-8';
 
-/** Fixed system prompt — identical for every variant and task. */
+/**
+ * Fixed system prompt — identical for every variant and task.
+ *
+ * MECHANIC: a neutral "automated API client" framing. Deliberately minimal so the
+ * SPEC is the only variable. Default; used by the mechanical task set.
+ */
 export const SYSTEM_PROMPT = [
   'You are an automated API client. You are given a set of tools, each wrapping one',
   'operation of a REST API, and a task to accomplish by calling those tools.',
@@ -45,6 +50,24 @@ export const SYSTEM_PROMPT = [
   'resource, then use the id it returns in a later call. Inspect each tool result',
   'before deciding the next call. When the task is fully accomplished, stop and give',
   'a one-line summary. Do not ask the user questions; act autonomously.',
+].join(' ');
+
+/**
+ * PERSONA: a realistic domain agent — an e-commerce shopping assistant. This is
+ * how agents are actually deployed (a persona + a domain goal, not a neutral
+ * mechanic). It points the agent at the tool DESCRIPTIONS to map a plain-language
+ * request to operations — so a degraded spec (poor descriptions / mangled
+ * operationIds) has more room to cost task success. Pair with the GOAL task set.
+ */
+export const PERSONA_SYSTEM_PROMPT = [
+  'You are an online shopping assistant for an e-commerce store. You manage customers,',
+  'orders, and line-items by calling the store API through the tools provided. A colleague',
+  'hands you a request in plain language; work out which operations achieve it and carry',
+  'them out. Lean on each tool’s description to understand what it does and which fields',
+  'it needs — the request will not name the operations for you. Most requests need several',
+  'dependent calls: create or look up something, then use the id it returns in the next',
+  'call. Check each result before the next step. When the request is fully handled, give a',
+  'one-line summary. Act autonomously; do not ask questions.',
 ].join(' ');
 
 /** A single recorded tool call + its result, for the transcript. */
@@ -116,6 +139,8 @@ export interface RunOptions {
   client: LlmClient;
   /** Tasks to run (defaults to the full a7n set). */
   tasks?: CalibrationTask[];
+  /** System prompt for the agent (defaults to the mechanic SYSTEM_PROMPT). */
+  system?: string;
   /** Backend response-completeness toggle (the thin-responses variant). */
   thinResponses?: boolean;
   /** Safety cap on loop steps per task. */
@@ -248,6 +273,7 @@ async function runTask(
   resolveTool: (name: string) => AgentTool | undefined,
   client: LlmClient,
   maxSteps: number,
+  system: string,
 ): Promise<TaskRunRecord> {
   const availableNames = tools.map((t) => t.name);
   const wireTools = toWireTools(tools);
@@ -259,7 +285,7 @@ async function runTask(
   let truncated = false;
 
   while (steps < maxSteps) {
-    const req: LlmRequest = { system: SYSTEM_PROMPT, tools: wireTools, turns };
+    const req: LlmRequest = { system, tools: wireTools, turns };
     const resp = await client.step(req);
     steps += 1;
 
@@ -289,11 +315,12 @@ async function runTask(
     }
   }
 
-  // Decide success ONLY from ground truth via the a7n checker.
+  // Decide success ONLY from ground truth, via THIS task's own assert (not a
+  // global-registry lookup — goal-only tasks aren't in the mechanical TASKS set).
   let result: TaskResult;
   try {
     const truth = await fetchTruth(baseUrl);
-    result = checkTask(task.id, truth);
+    result = task.assert(truth);
   } catch (e) {
     result = { taskId: task.id, pass: false, detail: `failed to read /__truth: ${(e as Error).message}` };
   }
@@ -319,6 +346,7 @@ export async function runVariant(opts: RunOptions): Promise<VariantRunResult> {
   const tasks = opts.tasks ?? TASKS;
   const thinResponses = opts.thinResponses ?? false;
   const maxSteps = opts.maxSteps ?? 25;
+  const system = opts.system ?? SYSTEM_PROMPT;
   const tools = specToTools(opts.spec);
 
   // Resolve an agent-emitted tool name to a variant tool: exact name first, then
@@ -346,6 +374,7 @@ export async function runVariant(opts: RunOptions): Promise<VariantRunResult> {
         resolveTool,
         opts.client,
         maxSteps,
+        system,
       );
       records.push(record);
       opts.onRecord?.(record);

@@ -22,3 +22,6 @@ adapters/
 mockbank-openapi.yaml
 # Local working docs (runbooks, spikes) — not product docs
 .local/
+
+# aidf local config (not code)
+.aidf.yml

@@ -125,6 +125,10 @@ export interface VariantSummary {
   taskCount: number;
   passCount: number;
   successRate: number;
+  /** True if this variant's run used a real (live) agent, not the deterministic mock. */
+  live: boolean;
+  /** The agent id the run recorded (e.g. `openrouter:...`, `anthropic:...`, `mock:...`). */
+  agent?: string;
   /** Variant-level runtime telemetry rollup (from the capture). */
   telemetry: {
     totalCalls: number;
@@ -316,6 +320,8 @@ export function analyze(inputs: AnalyzeInputs): AnalysisResult {
       taskCount: total,
       passCount: pass,
       successRate: rate,
+      live: Boolean(run.live),
+      agent: run.agent,
       telemetry: {
         totalCalls: cap?.totalCalls ?? 0,
         verificationLoops: cap?.totalVerificationLoops ?? 0,
@@ -418,15 +424,22 @@ export function analyze(inputs: AnalyzeInputs): AnalysisResult {
   const rsCombined = rCombined * rCombined;
   const gain = rsCombined - rsStatic;
 
+  const anyLive = variants.some((v) => v.live);
+  const liveAgent = variants.find((v) => v.live)?.agent;
   let verdict: string;
   const successValues = new Set(ys);
   if (successValues.size <= 1) {
-    verdict =
-      'No success variance across variants (all variants share the same success rate) — ' +
-      'correlation is undefined on this dataset, so neither static nor runtime prediction ' +
-      'can be evaluated. Re-run with the LIVE agent (npm run calib:analyze:live note) to get a ' +
-      'success gradient. On a gradient, rSquaredGain > 0 means specwatch telemetry explains ' +
-      'success the static JAIRF read alone misses.';
+    verdict = anyLive
+      ? `No success variance across variants — but this is a LIVE run (${liveAgent}): the real ` +
+        `agent passed every task on every variant, including the degraded ones. The gradient is ` +
+        `flat because the agent was robust to these spec ablations on this task set, not because ` +
+        `the data is synthetic. Correlation is undefined (no variance), so prediction can't be ` +
+        `evaluated. To surface a gradient, raise difficulty (harder/ambiguous tasks, a weaker ` +
+        `agent, an API where descriptions/operationIds are load-bearing) — see notes.`
+      : 'No success variance across variants (all variants share the same success rate) — ' +
+        'correlation is undefined on this dataset, so neither static nor runtime prediction ' +
+        'can be evaluated. Re-run with the LIVE agent to get a success gradient. On a gradient, ' +
+        'rSquaredGain > 0 means specwatch telemetry explains success the static read alone misses.';
   } else if (gain > 0.01) {
     verdict =
       `Static + specwatch telemetry predicts agent success better than static JAIRF alone ` +
@@ -441,11 +454,19 @@ export function analyze(inputs: AnalyzeInputs): AnalysisResult {
 
   if (successValues.size <= 1) {
     notes.push(
-      'All variants have identical success rates in these artifacts. With the deterministic ' +
-        'MOCK agent every task passes regardless of spec quality, so there is no signal->success ' +
-        'gradient to regress. The table is populated (gold-vs-degraded rows present) but every ' +
-        'delta is 0 and nothing is flagged significant. A real gradient requires the LIVE agent ' +
-        '(human-gated, needs ANTHROPIC_API_KEY).',
+      anyLive
+        ? `All variants have identical success rates — and this is a LIVE run (${liveAgent}). ` +
+          `The real agent completed every task on every variant, including bad-operationids, ` +
+          `thin-responses, and all-bad. This is a genuine NULL result, not a synthetic artifact: ` +
+          `for this conventional CRUD backend and this 5-task set, JAIRF spec quality did not ` +
+          `move agent task-success. Likely because the ablations leave the load-bearing structure ` +
+          `intact (routes, methods, parameter schemas), and a capable agent infers the API from ` +
+          `that alone. To get a non-flat gradient, harden the setup: harder/ambiguous tasks, more ` +
+          `tasks (for power), a weaker/cheaper agent, or an API where descriptions/operationIds/` +
+          `examples are actually load-bearing (non-obvious params, info only in prose).`
+        : 'All variants have identical success rates in these artifacts. With the deterministic ' +
+          'MOCK agent every task passes regardless of spec quality, so there is no ' +
+          'signal->success gradient to regress. A real gradient requires the LIVE agent.',
     );
   }
 
@@ -549,10 +570,15 @@ export function renderReport(r: AnalysisResult): string {
       lines.push(`  - \`${m.signal}\`: **${signed(m.successDelta * 100)}pp**`);
     }
   } else {
+    const liveRow = r.variants.find((v) => v.live);
     lines.push(
-      '**No signal moved success on this dataset** (every degraded variant matched gold success). ' +
-        'See notes — this is expected with the deterministic mock agent, which replays the gold ' +
-        'plan regardless of spec quality; a real gradient needs the LIVE agent.',
+      liveRow
+        ? `**No signal moved success on this dataset** — and this was a LIVE run ` +
+          `(\`${liveRow.agent}\`): every degraded variant matched gold (full success). A real ` +
+          `null result — for this conventional CRUD API and 5-task set, the agent was robust to ` +
+          `every ablation. See notes for how to harden the setup to surface a gradient.`
+        : '**No signal moved success on this dataset** (every degraded variant matched gold ' +
+          'success). Expected with the deterministic mock agent; a real gradient needs the LIVE agent.',
     );
   }
   lines.push('');

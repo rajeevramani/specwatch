@@ -185,20 +185,21 @@ describe('analyze (signal -> success, on committed fixtures)', () => {
     expect(md).toMatch(/-\d+pp/);
   });
 
-  it('committed report.md on disk matches a fresh render of the fixtures', () => {
-    // Guards against the committed report drifting from the fixtures it claims to
-    // summarise. We compare the table body (deltas/significance), not the
-    // timestamp line which is intentionally non-deterministic.
-    const committed = readFileSync(resolve(CALIB_ROOT, 'reports/report.md'), 'utf8');
-    const r = runFixtureAnalysis();
-    const fresh = renderReport(r);
-
+  it('fixture analysis render is deterministic (table body is stable across renders)', () => {
+    // The committed reports/report.md is now the LIVE deliverable (a real measured
+    // run), not a fixture snapshot — so we no longer pin it to the fixtures. Instead
+    // guard that the fixture render itself is reproducible: two renders of the same
+    // fixture analysis produce an identical table body (deltas/significance).
     const tableOf = (s: string) => {
       const start = s.indexOf('| JAIRF signal');
       const end = s.indexOf('## 2.');
       return s.slice(start, end).trim();
     };
-    expect(tableOf(committed)).toBe(tableOf(fresh));
+    const a = tableOf(renderReport(runFixtureAnalysis()));
+    const b = tableOf(renderReport(runFixtureAnalysis()));
+    expect(a).toBe(b);
+    // ...and the fixture render is genuinely populated with a gradient (a non-zero delta).
+    expect(a).toMatch(/-\d+pp/);
   });
 });
 

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-05T20:55:58.671Z",
+  "generatedAt": "2026-06-06T03:31:35.339Z",
   "alpha": 0.05,
   "goldVariant": "gold",
   "variants": [
@@ -12,11 +12,13 @@
       "taskCount": 5,
       "passCount": 5,
       "successRate": 1,
+      "live": true,
+      "agent": "openrouter:anthropic/claude-sonnet-4.5",
       "telemetry": {
-        "totalCalls": 19,
+        "totalCalls": 18,
         "verificationLoops": 0,
         "wastedRequests": 0,
-        "avgResponseCompleteness": 1,
+        "avgResponseCompleteness": null,
         "thinEndpointCount": 0
       }
     },
@@ -29,13 +31,15 @@
       "jairfOverall": 84,
       "jairfGrade": "B",
       "taskCount": 5,
-      "passCount": 4,
-      "successRate": 0.8,
+      "passCount": 5,
+      "successRate": 1,
+      "live": true,
+      "agent": "openrouter:anthropic/claude-sonnet-4.5",
       "telemetry": {
-        "totalCalls": 19,
-        "verificationLoops": 2,
-        "wastedRequests": 1,
-        "avgResponseCompleteness": 1,
+        "totalCalls": 18,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompleteness": null,
         "thinEndpointCount": 0
       }
     },
@@ -48,13 +52,15 @@
       "jairfOverall": 87,
       "jairfGrade": "B",
       "taskCount": 5,
-      "passCount": 3,
-      "successRate": 0.6,
+      "passCount": 5,
+      "successRate": 1,
+      "live": true,
+      "agent": "openrouter:anthropic/claude-sonnet-4.5",
       "telemetry": {
-        "totalCalls": 19,
-        "verificationLoops": 5,
-        "wastedRequests": 4,
-        "avgResponseCompleteness": 1,
+        "totalCalls": 18,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompleteness": null,
         "thinEndpointCount": 0
       }
     },
@@ -69,11 +75,13 @@
       "taskCount": 5,
       "passCount": 5,
       "successRate": 1,
+      "live": true,
+      "agent": "openrouter:anthropic/claude-sonnet-4.5",
       "telemetry": {
-        "totalCalls": 19,
-        "verificationLoops": 1,
+        "totalCalls": 18,
+        "verificationLoops": 0,
         "wastedRequests": 0,
-        "avgResponseCompleteness": 1,
+        "avgResponseCompleteness": null,
         "thinEndpointCount": 0
       }
     },
@@ -86,13 +94,15 @@
       "jairfOverall": 88,
       "jairfGrade": "B",
       "taskCount": 5,
-      "passCount": 3,
-      "successRate": 0.6,
+      "passCount": 5,
+      "successRate": 1,
+      "live": true,
+      "agent": "openrouter:anthropic/claude-sonnet-4.5",
       "telemetry": {
-        "totalCalls": 19,
-        "verificationLoops": 6,
-        "wastedRequests": 5,
-        "avgResponseCompleteness": 1,
+        "totalCalls": 18,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompleteness": null,
         "thinEndpointCount": 0
       }
     },
@@ -107,12 +117,14 @@
       "taskCount": 5,
       "passCount": 5,
       "successRate": 1,
+      "live": true,
+      "agent": "openrouter:anthropic/claude-sonnet-4.5",
       "telemetry": {
-        "totalCalls": 19,
-        "verificationLoops": 4,
-        "wastedRequests": 3,
-        "avgResponseCompleteness": 0.45,
-        "thinEndpointCount": 3
+        "totalCalls": 18,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompleteness": null,
+        "thinEndpointCount": 0
       }
     },
     {
@@ -124,18 +136,20 @@
         "errorSchemas",
         "completeness"
       ],
-      "runtimeDriven": false,
+      "runtimeDriven": true,
       "jairfOverall": 63,
       "jairfGrade": "C",
       "taskCount": 5,
-      "passCount": 1,
-      "successRate": 0.2,
+      "passCount": 5,
+      "successRate": 1,
+      "live": true,
+      "agent": "openrouter:anthropic/claude-sonnet-4.5",
       "telemetry": {
-        "totalCalls": 19,
-        "verificationLoops": 9,
-        "wastedRequests": 8,
-        "avgResponseCompleteness": 0.4,
-        "thinEndpointCount": 4
+        "totalCalls": 18,
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompleteness": null,
+        "thinEndpointCount": 0
       }
     }
   ],
@@ -165,20 +179,20 @@
       ],
       "runtimeDriven": false,
       "goldSuccessRate": 1,
-      "degradedSuccessRate": 0.8,
-      "successDelta": -0.19999999999999996,
+      "degradedSuccessRate": 1,
+      "successDelta": 0,
       "taskCount": 5,
       "goldPass": 5,
-      "degradedPass": 4,
-      "zStat": 1.0540925533894596,
-      "pValue": 0.2918405965879849,
+      "degradedPass": 5,
+      "zStat": 0,
+      "pValue": 1,
       "significant": false,
-      "directional": true,
+      "directional": false,
       "telemetryDelta": {
-        "verificationLoops": 2,
-        "wastedRequests": 1,
-        "avgResponseCompletenessGold": 1,
-        "avgResponseCompletenessDegraded": 1
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompletenessGold": null,
+        "avgResponseCompletenessDegraded": null
       }
     },
     {
@@ -206,20 +220,20 @@
       ],
       "runtimeDriven": false,
       "goldSuccessRate": 1,
-      "degradedSuccessRate": 0.6,
-      "successDelta": -0.4,
+      "degradedSuccessRate": 1,
+      "successDelta": 0,
       "taskCount": 5,
       "goldPass": 5,
-      "degradedPass": 3,
-      "zStat": 1.5811388300841898,
-      "pValue": 0.11384630482411429,
+      "degradedPass": 5,
+      "zStat": 0,
+      "pValue": 1,
       "significant": false,
-      "directional": true,
+      "directional": false,
       "telemetryDelta": {
-        "verificationLoops": 5,
-        "wastedRequests": 4,
-        "avgResponseCompletenessGold": 1,
-        "avgResponseCompletenessDegraded": 1
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompletenessGold": null,
+        "avgResponseCompletenessDegraded": null
       }
     },
     {
@@ -251,10 +265,10 @@
       "significant": false,
       "directional": false,
       "telemetryDelta": {
-        "verificationLoops": 1,
+        "verificationLoops": 0,
         "wastedRequests": 0,
-        "avgResponseCompletenessGold": 1,
-        "avgResponseCompletenessDegraded": 1
+        "avgResponseCompletenessGold": null,
+        "avgResponseCompletenessDegraded": null
       }
     },
     {
@@ -270,20 +284,20 @@
       ],
       "runtimeDriven": false,
       "goldSuccessRate": 1,
-      "degradedSuccessRate": 0.6,
-      "successDelta": -0.4,
+      "degradedSuccessRate": 1,
+      "successDelta": 0,
       "taskCount": 5,
       "goldPass": 5,
-      "degradedPass": 3,
-      "zStat": 1.5811388300841898,
-      "pValue": 0.11384630482411429,
+      "degradedPass": 5,
+      "zStat": 0,
+      "pValue": 1,
       "significant": false,
-      "directional": true,
+      "directional": false,
       "telemetryDelta": {
-        "verificationLoops": 6,
-        "wastedRequests": 5,
-        "avgResponseCompletenessGold": 1,
-        "avgResponseCompletenessDegraded": 1
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompletenessGold": null,
+        "avgResponseCompletenessDegraded": null
       }
     },
     {
@@ -302,62 +316,51 @@
       "significant": false,
       "directional": false,
       "telemetryDelta": {
-        "verificationLoops": 4,
-        "wastedRequests": 3,
-        "avgResponseCompletenessGold": 1,
-        "avgResponseCompletenessDegraded": 0.45
+        "verificationLoops": 0,
+        "wastedRequests": 0,
+        "avgResponseCompletenessGold": null,
+        "avgResponseCompletenessDegraded": null
       }
     }
   ],
   "significantSignals": [],
-  "directionalMovers": [
-    {
-      "signal": "operationId",
-      "successDelta": -0.4
-    },
-    {
-      "signal": "errorSchemas",
-      "successDelta": -0.4
-    },
-    {
-      "signal": "descriptions",
-      "successDelta": -0.19999999999999996
-    }
-  ],
+  "directionalMovers": [],
   "prediction": {
     "staticOnly": {
-      "rSquared": 0.6720003886136208,
-      "pearson": 0.8197562983067717,
+      "rSquared": 0,
+      "pearson": 0,
       "n": 7
     },
     "staticPlusRuntime": {
-      "rSquared": 0.49392535567624024,
-      "pearson": 0.702798232550595,
+      "rSquared": 0,
+      "pearson": 0,
       "n": 7
     },
-    "rSquaredGain": -0.17807503293738053,
-    "verdict": "Static JAIRF already captures most of the predictable success variance (R^2 0.672); specwatch telemetry adds -0.178 R^2 — marginal on this dataset."
+    "rSquaredGain": 0,
+    "verdict": "No success variance across variants — but this is a LIVE run (openrouter:anthropic/claude-sonnet-4.5): the real agent passed every task on every variant, including the degraded ones. The gradient is flat because the agent was robust to these spec ablations on this task set, not because the data is synthetic. Correlation is undefined (no variance), so prediction can't be evaluated. To surface a gradient, raise difficulty (harder/ambiguous tasks, a weaker agent, an API where descriptions/operationIds are load-bearing) — see notes."
   },
   "sources": {
     "manifest": "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/variants/manifest.json",
     "runs": [
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/all-bad.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/bad-operationids.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/gold.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-descriptions.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-error-schemas.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-examples.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/thin-responses.json"
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/all-bad.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/bad-operationids.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/gold.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/no-descriptions.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/no-error-schemas.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/no-examples.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/thin-responses.json"
     ],
     "captures": [
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/all-bad.specwatch.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/bad-operationids.specwatch.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/gold.specwatch.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-descriptions.specwatch.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-error-schemas.specwatch.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/no-examples.specwatch.json",
-      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/fixtures/runs/thin-responses.specwatch.json"
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/all-bad.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/bad-operationids.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/gold.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/no-descriptions.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/no-error-schemas.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/no-examples.specwatch.json",
+      "/Users/rajeevramani/workspace/projects/specwatch/eval/calibration/.runs/thin-responses.specwatch.json"
     ]
   },
-  "notes": []
+  "notes": [
+    "All variants have identical success rates — and this is a LIVE run (openrouter:anthropic/claude-sonnet-4.5). The real agent completed every task on every variant, including bad-operationids, thin-responses, and all-bad. This is a genuine NULL result, not a synthetic artifact: for this conventional CRUD backend and this 5-task set, JAIRF spec quality did not move agent task-success. Likely because the ablations leave the load-bearing structure intact (routes, methods, parameter schemas), and a capable agent infers the API from that alone. To get a non-flat gradient, harden the setup: harder/ambiguous tasks, more tasks (for power), a weaker/cheaper agent, or an API where descriptions/operationIds/examples are actually load-bearing (non-obvious params, info only in prose)."
+  ]
 }

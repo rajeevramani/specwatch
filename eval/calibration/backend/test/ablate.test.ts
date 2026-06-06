@@ -125,6 +125,22 @@ describe('ablation generator — single-signal attribution', () => {
     expect(def.degrades).toEqual(['completeness']);
   });
 
+  it('runtimeDriven iff the variant degrades completeness (specwatch-hfe guard)', () => {
+    for (const def of VARIANTS) {
+      expect(
+        def.runtimeDriven,
+        `${def.name}: runtimeDriven must equal degrades.includes('completeness')`,
+      ).toBe(def.degrades.includes('completeness'));
+    }
+    // all-bad degrades completeness, so it MUST be runtime-driven (else THIN_RESPONSES
+    // never fires and the completeness degradation is silently absent).
+    const allBad = VARIANTS.find((v) => v.name === 'all-bad')!;
+    expect(allBad.degrades).toContain('completeness');
+    expect(allBad.runtimeDriven).toBe(true);
+    // ...and the emitted manifest entry carries it through to the CLI/analyzer.
+    expect(byName.get('all-bad')!.entry.runtimeDriven).toBe(true);
+  });
+
   it('all-bad moves signals from every spec-level family', () => {
     const allBad = byName.get('all-bad')!.spec;
     const changed = new Set(changedSignals(goldSpec, allBad));

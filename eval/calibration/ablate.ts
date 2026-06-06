@@ -288,9 +288,10 @@ export const VARIANTS: VariantDef[] = [
   },
   {
     name: 'all-bad',
-    label: 'Every spec-level degradation at once (run with THIN_RESPONSES for completeness too).',
+    label: 'Every degradation at once — spec-level families plus completeness (runtime-driven, ' +
+      'so THIN_RESPONSES is applied automatically like the thin-responses variant).',
     degrades: ['descriptions', 'operationId', 'examples', 'errorSchemas', 'completeness'],
-    runtimeDriven: false,
+    runtimeDriven: true,
     mutate: (spec) => {
       stripDescriptions(spec);
       mangleOperationIds(spec);
@@ -337,8 +338,27 @@ export interface Manifest {
   variants: ManifestEntry[];
 }
 
+/**
+ * Invariant: a variant is runtime-driven iff it degrades `completeness` (the only
+ * runtime signal, applied via the backend `THIN_RESPONSES` toggle, not the spec).
+ * Hand-set `runtimeDriven` and the `degrades` list must agree — otherwise a variant
+ * can declare completeness yet never apply it at run time (the specwatch-hfe bug,
+ * where `all-bad` had `runtimeDriven: false`). This guard fails the build on drift.
+ */
+function assertRuntimeDrivenConsistent(def: VariantDef): void {
+  const declaresCompleteness = def.degrades.includes('completeness');
+  if (def.runtimeDriven !== declaresCompleteness) {
+    throw new Error(
+      `Variant "${def.name}": runtimeDriven=${def.runtimeDriven} but degrades ` +
+        `completeness=${declaresCompleteness}. A completeness-degrading variant must be ` +
+        `runtimeDriven (so THIN_RESPONSES is applied); a non-completeness one must not be.`,
+    );
+  }
+}
+
 /** Build a single variant's spec object + manifest entry (no file I/O). */
 export function buildVariant(gold: any, def: VariantDef): { spec: any; entry: ManifestEntry } {
+  assertRuntimeDrivenConsistent(def);
   const spec = clone(gold);
   def.mutate(spec);
   const result = scoreSpec(spec);

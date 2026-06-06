@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-05T12:30:27.360Z",
+  "generatedAt": "2026-06-06T03:08:08.885Z",
   "gold": "specs/gold.yaml",
   "variants": [
     {
@@ -314,7 +314,7 @@
     },
     {
       "name": "all-bad",
-      "label": "Every spec-level degradation at once (run with THIN_RESPONSES for completeness too).",
+      "label": "Every degradation at once — spec-level families plus completeness (runtime-driven, so THIN_RESPONSES is applied automatically like the thin-responses variant).",
       "degrades": [
         "descriptions",
         "operationId",
@@ -322,7 +322,7 @@
         "errorSchemas",
         "completeness"
       ],
-      "runtimeDriven": false,
+      "runtimeDriven": true,
       "spec": "variants/all-bad.yaml",
       "jairf": {
         "overall": 63,

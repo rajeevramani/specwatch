@@ -5,11 +5,13 @@ Hand-authored OpenAPI documents for the JAIRF spec-ablation experiment.
 ## `gold.yaml`
 
 The **gold** baseline (task specwatch-tey): a high-quality OpenAPI 3.1 spec for
-the calibration backend (`../backend`) with every phase-1 signal GOOD —
+the calibration backend (`../backend`) with the phase-1 signal families good —
 
 - full operation / parameter / schema descriptions
 - clean, unique, camelCase `operationId`s
-- request + response examples on every operation
+- response examples on every operation (note: **request** examples are partial —
+  `request_examples: 35` vs `response_examples: 100`; the `no-examples` variant is
+  therefore primarily a response-example ablation)
 - RFC 9457 (`application/problem+json`) error-response schemas
 - complete write-response bodies (the full created/updated resource)
 

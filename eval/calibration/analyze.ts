@@ -458,7 +458,8 @@ export function analyze(inputs: AnalyzeInputs): AnalysisResult {
         ? `All variants have identical success rates — and this is a LIVE run (${liveAgent}). ` +
           `The real agent completed every task on every variant, including bad-operationids, ` +
           `thin-responses, and all-bad. This is a genuine NULL result, not a synthetic artifact: ` +
-          `for this conventional CRUD backend and this 5-task set, JAIRF spec quality did not ` +
+          `for this conventional CRUD backend and this ${variants[0]?.taskCount ?? 0}-task set, ` +
+          `JAIRF spec quality did not ` +
           `move agent task-success. Likely because the ablations leave the load-bearing structure ` +
           `intact (routes, methods, parameter schemas), and a capable agent infers the API from ` +
           `that alone. To get a non-flat gradient, harden the setup: harder/ambiguous tasks, more ` +
@@ -575,7 +576,7 @@ export function renderReport(r: AnalysisResult): string {
       liveRow
         ? `**No signal moved success on this dataset** — and this was a LIVE run ` +
           `(\`${liveRow.agent}\`): every degraded variant matched gold (full success). A real ` +
-          `null result — for this conventional CRUD API and 5-task set, the agent was robust to ` +
+          `null result — for this conventional CRUD API and ${liveRow.taskCount}-task set, the agent was robust to ` +
           `every ablation. See notes for how to harden the setup to surface a gradient.`
         : '**No signal moved success on this dataset** (every degraded variant matched gold ' +
           'success). Expected with the deterministic mock agent; a real gradient needs the LIVE agent.',

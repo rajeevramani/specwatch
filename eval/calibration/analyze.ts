@@ -336,7 +336,7 @@ export function analyze(inputs: AnalyzeInputs): AnalysisResult {
   const gold = successRate(goldRun);
   const goldCap = captureByName.get(goldVariant)?.variant;
 
-  // --- Signal -> success table. One row per single-signal-ablation variant. -
+  // --- Signal -> success table. One row per single-family-ablation variant. -
   const signalTable: SignalSuccessRow[] = [];
   for (const mv of inputs.manifest.variants) {
     if (mv.name === goldVariant) continue;
@@ -488,8 +488,9 @@ export function renderReport(r: AnalysisResult): string {
   lines.push('');
   lines.push(
     '> **Objective.** Which JAIRF signals *causally* move agent task-success, and by how much? ' +
-      'One real backend, one fixed agent, one task set — only the spec changes. Each variant ' +
-      'degrades exactly one JAIRF signal, so a success drop is *attributable* to that signal. ' +
+      'One real backend, one fixed agent, one task set; each variant degrades one JAIRF signal ' +
+      '*family* (completeness via the backend `THIN_RESPONSES` toggle, the rest via the spec), ' +
+      'so a success drop is *attributable* to that family. ' +
       'The deltas below are empirical, causal weights to replace AgentReady’s guessed ones.',
   );
   lines.push('');

@@ -1,8 +1,8 @@
 # Calibration report — JAIRF signal -> agent task-success
 
-> **Objective.** Which JAIRF signals *causally* move agent task-success, and by how much? One real backend, one fixed agent, one task set — only the spec changes. Each variant degrades exactly one JAIRF signal, so a success drop is *attributable* to that signal. The deltas below are empirical, causal weights to replace AgentReady’s guessed ones.
+> **Objective.** Which JAIRF signals *causally* move agent task-success, and by how much? One real backend, one fixed agent, one task set; each variant degrades one JAIRF signal *family* (completeness via the backend `THIN_RESPONSES` toggle, the rest via the spec), so a success drop is *attributable* to that family. The deltas below are empirical, causal weights to replace AgentReady’s guessed ones.
 
-Generated: 2026-06-05T20:55:58.671Z
+Generated: 2026-06-06T02:56:35.430Z
 Gold (baseline) variant: `gold`  ·  significance alpha = 0.05
 
 _Reproducible from run artifacts via_ `npm run calib:analyze` _(reads the variant manifest, the agent-runner `<variant>.json` success records, and the specwatch `<variant>.specwatch.json` telemetry; writes this report + `analysis.json`)._

@@ -2,7 +2,9 @@
  * Spec ablation generator (specwatch-sl1).
  *
  * Takes the hand-authored gold OpenAPI 3.1 spec and emits N variants, each
- * degrading EXACTLY ONE phase-1 JAIRF signal, plus an all-bad variant. Every
+ * degrading exactly one phase-1 JAIRF signal FAMILY (a family spans several
+ * coupled JAIRF keys; per-key isolation isn't achievable), plus an all-bad
+ * variant. Every
  * emitted variant is:
  *   - valid OpenAPI 3.1 (openapi/info/paths preserved),
  *   - different from gold in exactly one signal family (asserted via diff in the

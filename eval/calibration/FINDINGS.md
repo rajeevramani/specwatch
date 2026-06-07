@@ -109,3 +109,57 @@ parameter input-schemas — which the ablations leave intact. The spec's *prose*
 - Run artifacts: `.runs/` (sonnet), `.runs-gpt55/`, `.runs-qwen8b/` (gitignored).
 - Tasks: `specwatch-57p` (epic), `specwatch-w7x` (first live sweep), `specwatch-ewk`
   (persona + goal hardening + this write-up).
+
+---
+
+## Blog idea — "Agents read the skeleton, not the prose"
+
+**Status: idea / draft-pending.** Logged 2026-06-07.
+
+### Hook
+We took a clean OpenAPI spec, ran it through an AI-readiness scorer (JAIRF: 93/A), then
+**wrecked its documentation** — stripped descriptions, examples, error schemas, mangled
+operationIds — dropping the score to **63/C**. A 30-point swing. Then we pointed two
+frontier agents (Claude Sonnet 4.5, OpenAI GPT-5.5) at it and asked them to do real work.
+**They didn't notice.** 8/8 tasks, identical effort, on the gold spec and the wrecked one
+alike.
+
+### The precise claim (not the over-claim)
+NOT "spec quality doesn't matter." The honest, sharper claim:
+> **Given good structure, prose quality doesn't matter. A capable agent navigates from the
+> skeleton — routes, HTTP methods, parameter schemas — not from the prose around it.**
+
+Spec quality splits in two: **structure** (load-bearing) and **prose** (decoration for a
+strong model on a conventional API). We ablated the prose; the structure we fed clean as
+function-calling tool schemas, and never named an operation/route/verb in the prompts —
+so the agent had *only* the skeleton to go on, and that was enough.
+
+### The arc (what makes it a complete post, not a hot-take)
+1. Wreck the prose → nothing happens (this write-up's data).
+2. **Wreck the structure** → predict it breaks (the untested converse — ambiguous params,
+   hidden required fields, non-obvious routes, merged tools). *Run this before publishing.*
+3. Conclusion: optimize the **skeleton** (clear routes, precise param types/schemas, real
+   working auth); stop sweating prose polish — it's insurance for weak agents / weird APIs.
+
+### Why it's worth writing
+- Counterintuitive, data-backed, challenges the "score your spec for AI-readiness" pitch.
+- Clear mechanism (structure vs prose) → readers learn *why*.
+- The **intellectual-honesty thread** is a feature: we hunted for the effect across
+  conditions (strong→weak agent, success→efficiency, more tasks), nearly dressed up a
+  single noisy data point as signal, caught it. "How we tried to fool ourselves and didn't."
+
+### Caveats to state loudly (or a skeptic will)
+- N=1 conventional CRUD backend; mostly single runs; binary success is blunt.
+- Prose-not-structure — must be hammered or readers mis-read it as "specs are useless."
+- Weak-agent (Qwen3-8B) data was noisy + incomplete.
+
+### Suggested spine
+Hook (93→63, nothing changed) → setup (ablate prose, hold structure, fixed agent,
+ground-truth tasks) → result (flat across Claude + GPT-5.5; weak model just noisy) →
+mechanism (agents read param schemas + routes) → the honest twist (where we almost forced a
+signal) → so-what (optimize structure, not prose).
+
+### To do before publishing
+- [ ] Run the **structure-ablation** experiment (the converse) — gives the second half.
+- [ ] Consider ~3–5 runs/variant + one messier/unconventional API to kill the "too easy" critique.
+- [ ] Open-source the harness + link it (reproducibility).

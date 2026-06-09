@@ -13,6 +13,9 @@ import {
 
 export const AGENT_EVIDENCE_SCHEMA_VERSION = 'specwatch.agent_evidence.v1';
 
+/** Standard HTTP methods — used to scope REST-only signals (excludes JSON-RPC keys). */
+const HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']);
+
 export type RecommendationKind =
   | 'enrich_write_response'
   | 'document_common_next_step'
@@ -100,10 +103,25 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
     acc.missingResponseFields = endpoint.missingFields;
   }
 
-  for (const loop of opts.sequenceAnalysis.verificationLoops) {
-    const acc = getAccumulator(accumulators, loop.fromMethod, loop.fromPath);
-    acc.verificationLoopCount += loop.count;
-    acc.wastedRequestCount += loop.count;
+  // verification_loop_count and wasted_request_count derive from DISTINCT
+  // sequence patterns. Read-after-write loops feed verification_loop_count;
+  // repeated equivalent REST calls (retry) feed wasted_request_count.
+  // Sourcing both from the same signal is the bug this fixes.
+  //
+  // wasted is sourced only from REST retry sequences. REST detection pairs
+  // CONSECUTIVE samples, so the count is the true duplicate count. JSON-RPC
+  // detection is windowed (each request paired with up to N followers), so its
+  // sequence counts overcount duplicates; JSON-RPC protocol/tool redundancy is
+  // therefore surfaced at the report level (redundantCalls) rather than folded
+  // into per-operation evidence here (deferred to a later phase).
+  for (const seq of opts.sequenceAnalysis.sequences) {
+    if (seq.pattern === 'verification_loop') {
+      const acc = getAccumulator(accumulators, seq.fromMethod, seq.fromPath);
+      acc.verificationLoopCount += seq.count;
+    } else if (seq.pattern === 'retry' && HTTP_METHODS.has(seq.fromMethod.toUpperCase())) {
+      const acc = getAccumulator(accumulators, seq.fromMethod, seq.fromPath);
+      acc.wastedRequestCount += seq.count;
+    }
   }
 
   const nextSteps = collectNextSteps(opts.sequenceAnalysis.sequences);
@@ -235,7 +253,7 @@ function buildRecommendations(acc: OperationAccumulator): AgentEvidenceRecommend
     });
   }
 
-  if (acc.wastedRequestCount > acc.verificationLoopCount) {
+  if (acc.wastedRequestCount > 0) {
     recommendations.push({
       kind: 'reduce_redundant_call',
       severity: 'medium',

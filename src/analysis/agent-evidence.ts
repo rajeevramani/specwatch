@@ -144,7 +144,7 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
         wasted_request_count: acc.wastedRequestCount,
         missing_response_fields: acc.missingResponseFields,
         common_follow_up_operations: acc.commonFollowUpOperations,
-        recommendations: buildRecommendations(acc),
+        recommendations: buildRecommendations(acc, opts.sampleCount),
       };
 
       if (opts.specOperations) {
@@ -219,6 +219,8 @@ function collectNextSteps(sequences: OperationSequence[]): Map<string, string[]>
   for (const seq of sequences) {
     const fromKey = `${seq.fromMethod.toUpperCase()} ${seq.fromPath}`;
     const toKey = `${seq.toMethod.toUpperCase()} ${seq.toPath}`;
+    // A self-follow-up (e.g. a retry) is not a distinct "next step".
+    if (toKey === fromKey) continue;
     const counts = byOperation.get(fromKey) ?? new Map<string, number>();
     counts.set(toKey, (counts.get(toKey) ?? 0) + seq.count);
     byOperation.set(fromKey, counts);
@@ -234,30 +236,77 @@ function collectNextSteps(sequences: OperationSequence[]): Map<string, string[]>
   return result;
 }
 
-function buildRecommendations(acc: OperationAccumulator): AgentEvidenceRecommendation[] {
-  const recommendations: AgentEvidenceRecommendation[] = [];
+/** Below this sample count, recommendations carry a weak-signal caveat. */
+const LOW_SAMPLE_THRESHOLD = 10;
 
-  if (acc.responseCompleteness !== undefined && acc.responseCompleteness < 0.5) {
+/**
+ * Build the phase-1 recommendation set for an operation.
+ *
+ * Phase-1 emits exactly three kinds — `enrich_write_response`,
+ * `document_common_next_step`, `reduce_redundant_call`. The other two
+ * `RecommendationKind` values (`standardize_error_response`,
+ * `add_operation_metadata`) are declared in the type but have no producer yet
+ * (deferred to phase-2 — they need signals not collected here).
+ *
+ * Wording is OBSERVATIONAL and evidence-first: lead with what was observed, then
+ * suggest the fix. Language strength scales with confidence (a strong/repeated
+ * pattern reads "may reduce…"; a weak one reads "Consider…"), and a low sample
+ * count adds an explicit weak-signal caveat.
+ */
+function buildRecommendations(
+  acc: OperationAccumulator,
+  sampleCount: number,
+): AgentEvidenceRecommendation[] {
+  const recommendations: AgentEvidenceRecommendation[] = [];
+  const caveat =
+    sampleCount < LOW_SAMPLE_THRESHOLD ? ' (Low sample count — treat as a weak signal.)' : '';
+
+  // enrich_write_response: the write response is thin and/or agents had to
+  // re-read to confirm the write (read-after-write verification loops). Both are
+  // the same "the response didn't return enough" concern.
+  const thin = acc.responseCompleteness !== undefined && acc.responseCompleteness < 0.5;
+  const loops = acc.verificationLoopCount > 0;
+  if (thin || loops) {
+    const observed: string[] = [];
+    if (thin) {
+      observed.push(
+        `returned ${Math.round((acc.responseCompleteness as number) * 100)}% of the fields a later read returns`,
+      );
+    }
+    if (loops) {
+      observed.push(
+        `was followed by ${acc.verificationLoopCount} read-after-write verification read(s)`,
+      );
+    }
+    const strong =
+      acc.verificationLoopCount >= 3 || (thin && (acc.responseCompleteness as number) < 0.25);
+    const action = strong
+      ? 'Returning the created or updated resource in full may reduce these reads.'
+      : 'Consider returning the created or updated resource in full.';
     recommendations.push({
       kind: 'enrich_write_response',
-      severity: 'high',
-      message: `Return more complete data from ${acc.operationKey} to reduce agent read-after-write verification.`,
+      severity: strong ? 'high' : 'medium',
+      message: `${acc.operationKey} ${observed.join(' and ')}. ${action}${caveat}`,
     });
   }
 
-  if (acc.verificationLoopCount > 0) {
+  // document_common_next_step: agents repeatedly called ANOTHER operation after
+  // this one — driven by the observed follow-up data, not by verification loops.
+  if (acc.commonFollowUpOperations.length > 0) {
+    const next = acc.commonFollowUpOperations[0];
     recommendations.push({
       kind: 'document_common_next_step',
-      severity: 'medium',
-      message: `${acc.operationKey} was followed by verification reads ${acc.verificationLoopCount} time(s); document or enrich the response so agents know whether the write succeeded.`,
+      severity: 'low',
+      message: `Agents commonly called ${next} after ${acc.operationKey}. Consider documenting this next step or adding a response affordance (such as a link) so it is discoverable.${caveat}`,
     });
   }
 
+  // reduce_redundant_call: the same call was repeated with no new input.
   if (acc.wastedRequestCount > 0) {
     recommendations.push({
       kind: 'reduce_redundant_call',
       severity: 'medium',
-      message: `${acc.operationKey} contributed to redundant agent calls; clarify response semantics or next-step affordances.`,
+      message: `${acc.operationKey} was repeated ${acc.wastedRequestCount} time(s) with no new input. Consider clarifying the response semantics so a single call suffices.${caveat}`,
     });
   }
 

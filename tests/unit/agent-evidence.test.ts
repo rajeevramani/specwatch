@@ -217,3 +217,144 @@ describe('agent evidence builder', () => {
     ]);
   });
 });
+
+describe('phase-1 recommendation rules', () => {
+  function emptyCompleteness(): CompletenessReport {
+    return { endpoints: [], thinResponses: [], avgCompleteness: 0 };
+  }
+  function emptyAnalysis(overrides: Partial<SequenceAnalysis> = {}): SequenceAnalysis {
+    return {
+      sequences: [],
+      verificationLoops: [],
+      totalRequests: 0,
+      wastedRequests: 0,
+      redundantCalls: [],
+      toolUsage: [],
+      ...overrides,
+    };
+  }
+  function recsFor(operationKey: string, opts: Parameters<typeof buildAgentEvidence>[0]) {
+    const evidence = buildAgentEvidence(opts);
+    return evidence.operations.find((o) => o.operation_key === operationKey)?.recommendations ?? [];
+  }
+
+  it('document_common_next_step fires from observed follow-ups, not verification loops', () => {
+    // A plain next-step (POST /a -> GET /b), no verification loop, no completeness.
+    const analysis = emptyAnalysis({
+      sequences: [
+        {
+          fromMethod: 'POST',
+          fromPath: '/a',
+          toMethod: 'GET',
+          toPath: '/b',
+          avgDelayMs: 100,
+          count: 4,
+          pattern: 'unknown',
+        },
+      ],
+    });
+    const recs = recsFor('POST /a', {
+      runName: 'r',
+      sampleCount: 50,
+      sequenceAnalysis: analysis,
+      completenessReport: emptyCompleteness(),
+    });
+    const next = recs.find((r) => r.kind === 'document_common_next_step');
+    expect(next).toBeDefined();
+    expect(next?.message).toContain('GET /b');
+    expect(recs.map((r) => r.kind)).not.toContain('enrich_write_response');
+  });
+
+  it('enrich_write_response fires on low completeness OR on verification loops', () => {
+    const thinOnly = recsFor('POST /p', {
+      runName: 'r',
+      sampleCount: 50,
+      sequenceAnalysis: emptyAnalysis(),
+      completenessReport: {
+        endpoints: [
+          {
+            method: 'POST',
+            path: '/p',
+            writeFieldCount: 1,
+            readFieldCount: 5,
+            completenessScore: 0.2,
+            missingFields: ['a'],
+          },
+        ],
+        thinResponses: [],
+        avgCompleteness: 0.2,
+      },
+    });
+    expect(thinOnly.map((r) => r.kind)).toContain('enrich_write_response');
+
+    const loopOnly = recsFor('POST /q', {
+      runName: 'r',
+      sampleCount: 50,
+      sequenceAnalysis: emptyAnalysis({
+        sequences: [
+          {
+            fromMethod: 'POST',
+            fromPath: '/q',
+            toMethod: 'GET',
+            toPath: '/q/{id}',
+            avgDelayMs: 50,
+            count: 1,
+            pattern: 'verification_loop',
+          },
+        ],
+      }),
+      completenessReport: emptyCompleteness(),
+    });
+    expect(loopOnly.map((r) => r.kind)).toContain('enrich_write_response');
+  });
+
+  it('never emits the deferred phase-2 kinds', () => {
+    // A thin write response with a verification loop and a follow-up read.
+    const recs = recsFor('POST /products', {
+      runName: 'r',
+      sampleCount: 5,
+      sequenceAnalysis: sequenceAnalysis(),
+      completenessReport: completenessReport(),
+    });
+    const kinds = new Set(recs.map((r) => r.kind));
+    expect(kinds).not.toContain('standardize_error_response');
+    expect(kinds).not.toContain('add_operation_metadata');
+    for (const k of kinds) {
+      expect([
+        'enrich_write_response',
+        'document_common_next_step',
+        'reduce_redundant_call',
+      ]).toContain(k);
+    }
+  });
+
+  it('scales language with confidence and flags low sample counts', () => {
+    function enrich(verificationLoopCount: number, sampleCount: number) {
+      const sequences = Array.from({ length: verificationLoopCount }, () => ({
+        fromMethod: 'POST',
+        fromPath: '/x',
+        toMethod: 'GET',
+        toPath: '/x/{id}',
+        avgDelayMs: 50,
+        count: 1,
+        pattern: 'verification_loop' as const,
+      }));
+      return recsFor('POST /x', {
+        runName: 'r',
+        sampleCount,
+        sequenceAnalysis: emptyAnalysis({ sequences }),
+        completenessReport: emptyCompleteness(),
+      }).find((r) => r.kind === 'enrich_write_response');
+    }
+
+    const weak = enrich(1, 50);
+    expect(weak?.severity).toBe('medium');
+    expect(weak?.message).toContain('Consider');
+    expect(weak?.message).not.toContain('weak signal');
+
+    const strong = enrich(3, 5);
+    expect(strong?.severity).toBe('high');
+    expect(strong?.message).toContain('may reduce');
+    expect(strong?.message).toContain('weak signal'); // sampleCount 5 < threshold
+  });
+});

@@ -163,3 +163,26 @@ signal) → so-what (optimize structure, not prose).
 - [ ] Run the **structure-ablation** experiment (the converse) — gives the second half.
 - [ ] Consider ~3–5 runs/variant + one messier/unconventional API to kill the "too easy" critique.
 - [ ] Open-source the harness + link it (reproducibility).
+
+## Agent Evidence Bridge — thin vs rich write-response readiness (specwatch-ag5.5)
+
+Date: 2026-06-09. Validates AC #5 of the v0.3.4 agent-evidence-bridge: thin write
+responses produce weaker runtime readiness than rich ones, scored through the real
+embedded `x-specwatch-agent` consumption path in `@agentready/scoring` (the same
+path pinned by the ag5.4 contract test).
+
+Method (deterministic, not a live sweep): overlay representative per-operation
+runtime evidence on every write op of the gold spec, then score.
+- THIN: `responseCompleteness 0.2`, `verificationLoopDetected true`, `verificationLoopCount 3`.
+- RICH: `responseCompleteness 1.0`, `verificationLoopDetected false`.
+
+| Run | JAIRF overall |
+| --- | --- |
+| baseline (no runtime evidence) | 93 |
+| + RICH write-response evidence | 93 |
+| + THIN write-response evidence | 87 |
+
+Result: rich (93) > thin (87); thin drags the evidence-free baseline down by 6
+points; rich runtime evidence confirms the already-strong gold spec (no drag).
+Both runtime runs report `runtimeVerified: true` (the extension is consumed).
+Guarded by `backend/test/runtime-thin-vs-rich.test.ts`.

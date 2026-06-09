@@ -86,7 +86,10 @@ describe('agent evidence builder', () => {
       observed_count: 3,
       response_completeness: 0.25,
       verification_loop_count: 3,
-      wasted_request_count: 3,
+      // A verification loop is NOT a redundant duplicate: with no retry/
+      // redundant_list sequences, wasted_request_count is 0 and the
+      // reduce_redundant_call recommendation does not fire.
+      wasted_request_count: 0,
       missing_response_fields: ['name', 'price', 'status'],
       common_follow_up_operations: ['GET /products/{id}'],
     });
@@ -94,6 +97,73 @@ describe('agent evidence builder', () => {
       'enrich_write_response',
       'document_common_next_step',
     ]);
+  });
+
+  it('emits reduce_redundant_call from repeated equivalent calls (retry), distinct from verification loops', () => {
+    const analysis: SequenceAnalysis = {
+      sequences: [
+        {
+          fromMethod: 'GET',
+          fromPath: '/products',
+          toMethod: 'GET',
+          toPath: '/products',
+          avgDelayMs: 50,
+          count: 2,
+          pattern: 'retry',
+        },
+      ],
+      verificationLoops: [],
+      totalRequests: 5,
+      wastedRequests: 2,
+      redundantCalls: [],
+      toolUsage: [{ operationKey: 'GET /products', count: 3, isRedundant: true }],
+    };
+
+    const evidence = buildAgentEvidence({
+      runName: 'redundant-products',
+      sampleCount: 5,
+      sequenceAnalysis: analysis,
+      completenessReport: { endpoints: [], thinResponses: [], avgCompleteness: 0 },
+    });
+
+    const get = evidence.operations.find((op) => op.operation_key === 'GET /products');
+    expect(get?.wasted_request_count).toBe(2);
+    expect(get?.verification_loop_count).toBe(0);
+    expect(get?.recommendations.map((r) => r.kind)).toContain('reduce_redundant_call');
+  });
+
+  it('does not fold JSON-RPC protocol redundancy into per-operation wasted_request_count', () => {
+    // JSON-RPC sequence detection is windowed, so its counts overcount duplicates.
+    // Protocol/tool redundancy is surfaced at the report level (redundantCalls),
+    // NOT folded into per-operation evidence here. No reduce_redundant_call fires.
+    const analysis: SequenceAnalysis = {
+      sequences: [
+        {
+          fromMethod: 'tools/list',
+          fromPath: 'tools/list',
+          toMethod: 'tools/list',
+          toPath: 'tools/list',
+          avgDelayMs: 10,
+          count: 2,
+          pattern: 'redundant_list',
+        },
+      ],
+      verificationLoops: [],
+      totalRequests: 4,
+      wastedRequests: 2,
+      redundantCalls: [{ operationKey: 'tools/list', count: 3, expectedCount: 1 }],
+      toolUsage: [{ operationKey: 'tools/list', count: 3, isRedundant: true }],
+    };
+
+    const evidence = buildAgentEvidence({
+      runName: 'rpc-redundant',
+      sampleCount: 4,
+      sequenceAnalysis: analysis,
+      completenessReport: { endpoints: [], thinResponses: [], avgCompleteness: 0 },
+    });
+
+    const allKinds = evidence.operations.flatMap((o) => o.recommendations.map((r) => r.kind));
+    expect(allKinds).not.toContain('reduce_redundant_call');
   });
 
   it('maps evidence to OpenAPI operation IDs and spec locations', () => {

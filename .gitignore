@@ -25,3 +25,6 @@ mockbank-openapi.yaml
 
 # aidf local config (not code)
 .aidf.yml
+
+# Local bd state
+.beads/

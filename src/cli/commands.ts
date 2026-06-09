@@ -32,7 +32,7 @@ import { investigateRedundantCalls, investigateOperation } from '../analysis/inv
 import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/completeness.js';
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
 import { buildAgentEvidence } from '../analysis/agent-evidence.js';
-import { collectOpenApiOperations, loadOpenApiSpec } from '../analysis/spec-mapper.js';
+import { collectOpenApiOperations, parseOpenApiSpec } from '../analysis/spec-mapper.js';
 import { extractJsonRpcFromBody, isJsonRpcSession, unwrapMcpResponse } from '../analysis/jsonrpc.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
 import { discoverDomainModels } from '../export/domain-models.js';
@@ -906,17 +906,22 @@ export function createProgram(): Command {
         const evidenceFile = opts['output'] as string | undefined;
         if (evidenceFile) {
           const specPath = opts['spec'] as string | undefined;
-          const spec = specPath ? loadOpenApiSpec(specPath) : undefined;
-          const specOperations = spec ? collectOpenApiOperations(spec) : undefined;
+          // Read the spec once; reuse the same bytes for parsing and hashing.
+          const { readFileSync, writeFileSync } = await import('node:fs');
+          const specContent = specPath ? readFileSync(specPath, 'utf8') : undefined;
+          const specOperations =
+            specContent !== undefined
+              ? collectOpenApiOperations(parseOpenApiSpec(specContent, specPath))
+              : undefined;
           const evidence = buildAgentEvidence({
             runName: sessionName,
             sampleCount: session.sampleCount,
             sequenceAnalysis,
             completenessReport,
             specSource: specPath,
+            specContent,
             specOperations,
           });
-          const { writeFileSync } = await import('node:fs');
           writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
           success(`Wrote agent evidence to ${evidenceFile}`);
         }

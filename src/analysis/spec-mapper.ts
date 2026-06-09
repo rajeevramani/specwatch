@@ -16,15 +16,21 @@ export interface OpenApiOperationRef {
 export interface OperationMatch {
   operation?: OpenApiOperationRef;
   warning?: string;
+  /** True when the warning is from multiple candidate operations (not a no-match). */
+  ambiguous?: boolean;
 }
 
-export function loadOpenApiSpec(filePath: string): Record<string, unknown> {
-  const raw = readFileSync(filePath, 'utf8');
+/** Parse already-read OpenAPI document text (JSON or YAML) into an object. */
+export function parseOpenApiSpec(raw: string, filePath = '<string>'): Record<string, unknown> {
   const parsed = yaml.load(raw);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`OpenAPI spec at ${filePath} did not parse to an object`);
   }
   return parsed as Record<string, unknown>;
+}
+
+export function loadOpenApiSpec(filePath: string): Record<string, unknown> {
+  return parseOpenApiSpec(readFileSync(filePath, 'utf8'), filePath);
 }
 
 export function collectOpenApiOperations(spec: Record<string, unknown>): OpenApiOperationRef[] {
@@ -70,6 +76,7 @@ export function matchOpenApiOperation(
   if (exact.length === 1) return { operation: exact[0] };
   if (exact.length > 1) {
     return {
+      ambiguous: true,
       warning: `Ambiguous OpenAPI match for ${normalizedMethod} ${observedPath}: ${exact.map((op) => op.path).join(', ')}`,
     };
   }
@@ -78,6 +85,7 @@ export function matchOpenApiOperation(
   if (templated.length === 1) return { operation: templated[0] };
   if (templated.length > 1) {
     return {
+      ambiguous: true,
       warning: `Ambiguous OpenAPI template match for ${normalizedMethod} ${observedPath}: ${templated.map((op) => op.path).join(', ')}`,
     };
   }
@@ -85,7 +93,9 @@ export function matchOpenApiOperation(
   return { warning: `No OpenAPI operation matched ${normalizedMethod} ${observedPath}` };
 }
 
-export function parseOperationKey(operationKey: string): { method: string; path: string } | undefined {
+export function parseOperationKey(
+  operationKey: string,
+): { method: string; path: string } | undefined {
   const match = operationKey.match(/^([A-Z]+)\s+(.+)$/);
   if (!match) return undefined;
   return { method: match[1], path: match[2] };
@@ -98,7 +108,11 @@ function pathTemplatesCompatible(specPath: string, observedPath: string): boolea
 
   return specSegments.every((specSegment, index) => {
     const observedSegment = observedSegments[index];
-    return specSegment === observedSegment || isTemplateSegment(specSegment) || isTemplateSegment(observedSegment);
+    return (
+      specSegment === observedSegment ||
+      isTemplateSegment(specSegment) ||
+      isTemplateSegment(observedSegment)
+    );
   });
 }
 

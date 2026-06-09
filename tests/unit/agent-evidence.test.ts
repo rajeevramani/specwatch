@@ -216,6 +216,53 @@ describe('agent evidence builder', () => {
       },
     ]);
   });
+
+  it('keeps an ambiguous match in operations[] with a warning but excludes it from unmatched', () => {
+    // Two template candidates for GET /products/{id}: an ambiguous match.
+    const ambiguousSpec = {
+      openapi: '3.1.0',
+      paths: {
+        '/products': { post: { operationId: 'createProduct' } },
+        '/products/{productId}': { get: { operationId: 'getByProductId' } },
+        '/products/{slug}': { get: { operationId: 'getBySlug' } },
+      },
+    };
+    const evidence = buildAgentEvidence({
+      runName: 'thin-products',
+      sampleCount: 8,
+      sequenceAnalysis: sequenceAnalysis(),
+      completenessReport: completenessReport(),
+      specOperations: collectOpenApiOperations(ambiguousSpec),
+    });
+
+    const get = evidence.operations.find((op) => op.operation_key === 'GET /products/{id}');
+    expect(get).toBeDefined();
+    expect(get?.operation_id).toBeUndefined();
+    expect(get?.warnings?.[0]).toContain('Ambiguous');
+    // Ambiguous matches are NOT summarized in unmatched_observations.
+    const unmatchedKeys = (evidence.unmatched_observations ?? []).map((u) => u.operation_key);
+    expect(unmatchedKeys).not.toContain('GET /products/{id}');
+    // The POST mapped cleanly; only it should be absent from unmatched too.
+    expect(unmatchedKeys).toEqual([]);
+  });
+
+  it('hashes the provided spec content without a second file read', async () => {
+    const { createHash } = await import('node:crypto');
+    const content = 'openapi: "3.1.0"\npaths: {}\n';
+    const evidence = buildAgentEvidence({
+      runName: 'thin-products',
+      sampleCount: 8,
+      sequenceAnalysis: sequenceAnalysis(),
+      completenessReport: completenessReport(),
+      // specSource is a label only; a non-existent path must NOT be read because
+      // specContent is supplied.
+      specSource: '/does/not/exist.yaml',
+      specContent: content,
+    });
+
+    const expected = `sha256:${createHash('sha256').update(content).digest('hex')}`;
+    expect(evidence.spec).toEqual({ source: '/does/not/exist.yaml', hash: expected });
+  });
 });
 
 describe('phase-1 recommendation rules', () => {

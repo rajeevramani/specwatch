@@ -31,6 +31,8 @@ import { detectPhases } from '../analysis/phases.js';
 import { investigateRedundantCalls, investigateOperation } from '../analysis/investigation.js';
 import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/completeness.js';
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
+import { buildAgentEvidence } from '../analysis/agent-evidence.js';
+import { collectOpenApiOperations, loadOpenApiSpec } from '../analysis/spec-mapper.js';
 import { extractJsonRpcFromBody, isJsonRpcSession, unwrapMcpResponse } from '../analysis/jsonrpc.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
 import { discoverDomainModels } from '../export/domain-models.js';
@@ -832,6 +834,8 @@ export function createProgram(): Command {
     .argument('[session-id]', 'Session ID (defaults to latest completed)')
     .option('--name <name>', 'Session name')
     .option('--explain', 'Use LLM for richer explanations')
+    .option('--spec <file>', 'OpenAPI spec to map observed operations against')
+    .option('-o, --output <file>', 'Write machine-readable agent evidence JSON')
     .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
       try {
         const db = getDatabase();
@@ -889,7 +893,7 @@ export function createProgram(): Command {
 
         // Format and output
         const sessionName = session.name ?? session.id.slice(0, 8);
-        const output = formatAgentReport(
+        const reportOutput = formatAgentReport(
           sessionName,
           sequenceAnalysis,
           completenessReport,
@@ -898,7 +902,26 @@ export function createProgram(): Command {
           investigationReport,
           samples,
         );
-        process.stdout.write(output + '\n');
+
+        const evidenceFile = opts['output'] as string | undefined;
+        if (evidenceFile) {
+          const specPath = opts['spec'] as string | undefined;
+          const spec = specPath ? loadOpenApiSpec(specPath) : undefined;
+          const specOperations = spec ? collectOpenApiOperations(spec) : undefined;
+          const evidence = buildAgentEvidence({
+            runName: sessionName,
+            sampleCount: session.sampleCount,
+            sequenceAnalysis,
+            completenessReport,
+            specSource: specPath,
+            specOperations,
+          });
+          const { writeFileSync } = await import('node:fs');
+          writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+          success(`Wrote agent evidence to ${evidenceFile}`);
+        }
+
+        process.stdout.write(reportOutput + '\n');
       } catch (err) {
         handleError(err);
       }

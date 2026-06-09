@@ -72,6 +72,8 @@ export interface BuildAgentEvidenceOptions {
   sequenceAnalysis: SequenceAnalysis;
   completenessReport: CompletenessReport;
   specSource?: string;
+  /** Raw spec text already read by the caller — hashed here to avoid a second read. */
+  specContent?: string;
   specOperations?: OpenApiOperationRef[];
 }
 
@@ -153,8 +155,14 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
           evidenceOperation.operation_id = match.operation.operationId;
           evidenceOperation.spec_location = match.operation.specLocation;
         } else if (match.warning) {
+          // The operation always lives once in operations[] carrying the warning.
+          // unmatched_observations is a summary index of NO-MATCH keys only;
+          // ambiguous matches (multiple candidates) are excluded from it — they
+          // stay in operations[] with the warning and an omitted operation_id.
           evidenceOperation.warnings = [match.warning];
-          unmatched.push({ operation_key: acc.operationKey, reason: match.warning });
+          if (!match.ambiguous) {
+            unmatched.push({ operation_key: acc.operationKey, reason: match.warning });
+          }
         }
       }
 
@@ -177,10 +185,11 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
   };
 
   if (opts.specSource) {
-    evidence.spec = {
-      source: opts.specSource,
-      hash: hashFile(opts.specSource),
-    };
+    // Hash the bytes the caller already read when available; only fall back to a
+    // second read if raw content was not provided.
+    const hash =
+      opts.specContent !== undefined ? hashContent(opts.specContent) : hashFile(opts.specSource);
+    evidence.spec = { source: opts.specSource, hash };
   }
   if (unmatched.length > 0) {
     evidence.unmatched_observations = unmatched;
@@ -313,9 +322,12 @@ function buildRecommendations(
   return recommendations;
 }
 
+function hashContent(content: string): string {
+  return `sha256:${createHash('sha256').update(content).digest('hex')}`;
+}
+
 function hashFile(filePath: string): string {
-  const body = readFileSync(filePath);
-  return `sha256:${createHash('sha256').update(body).digest('hex')}`;
+  return hashContent(readFileSync(filePath, 'utf8'));
 }
 
 function round(value: number): number {

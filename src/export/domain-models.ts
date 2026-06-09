@@ -92,18 +92,7 @@ function deriveModelName(path: string): string {
   const lastSegment = segments[segments.length - 1];
   const pascalCase = lastSegment.charAt(0).toUpperCase() + lastSegment.slice(1);
 
-  // Simple singularization: strip trailing 's' if present (covers most REST APIs)
-  if (pascalCase.endsWith('ies')) {
-    return pascalCase.slice(0, -3) + 'y';
-  }
-  if (pascalCase.endsWith('ses') || pascalCase.endsWith('xes') || pascalCase.endsWith('zes')) {
-    return pascalCase.slice(0, -2);
-  }
-  if (pascalCase.endsWith('s') && !pascalCase.endsWith('ss')) {
-    return pascalCase.slice(0, -1);
-  }
-
-  return pascalCase;
+  return singularizePascalName(pascalCase);
 }
 
 /**
@@ -230,12 +219,21 @@ function chooseBestName(usages: DomainModelUsage[], schema: InferredSchema): str
 function singularizeFieldName(field: string): string | undefined {
   if (field.length < 2) return undefined;
   const pascal = field.charAt(0).toUpperCase() + field.slice(1);
-  if (pascal.endsWith('ies') && pascal.length > 3) return pascal.slice(0, -3) + 'y';
-  if (pascal.endsWith('ses') || pascal.endsWith('xes') || pascal.endsWith('zes')) {
-    return pascal.slice(0, -2);
+  return singularizePascalName(pascal);
+}
+
+function singularizePascalName(name: string): string {
+  if (name.endsWith('ies') && name.length > 3) return name.slice(0, -3) + 'y';
+
+  const removeEsSuffixes = ['ses', 'xes', 'zes', 'ches', 'shes'];
+  for (const suffix of removeEsSuffixes) {
+    if (name.endsWith(suffix) && name.length > suffix.length) {
+      return name.slice(0, -2);
+    }
   }
-  if (pascal.endsWith('s') && !pascal.endsWith('ss')) return pascal.slice(0, -1);
-  return pascal;
+
+  if (name.endsWith('s') && !name.endsWith('ss')) return name.slice(0, -1);
+  return name;
 }
 
 // ============================================================

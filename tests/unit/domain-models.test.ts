@@ -811,6 +811,56 @@ describe('discoverDomainModels', () => {
       expect(registry.models.find((m) => m.name === 'Order')).toBeUndefined();
     });
 
+    it('singularizes nested plural field names with explicit es suffix handling', () => {
+      const addressSchema: InferredSchema = {
+        type: 'object',
+        properties: {
+          street: { type: 'string', stats: FIELD_STATS },
+          city: { type: 'string', stats: FIELD_STATS },
+        },
+        required: ['street', 'city'],
+        stats: FIELD_STATS,
+      };
+      const statusSchema: InferredSchema = {
+        type: 'object',
+        properties: {
+          code: { type: 'string', stats: FIELD_STATS },
+          label: { type: 'string', stats: FIELD_STATS },
+        },
+        required: ['code', 'label'],
+        stats: FIELD_STATS,
+      };
+      const ownerSchema: InferredSchema = {
+        type: 'object',
+        properties: {
+          ownerId: { type: 'string', stats: FIELD_STATS },
+          addresses: { type: 'array', items: addressSchema, stats: FIELD_STATS },
+          statuses: { type: 'array', items: statusSchema, stats: FIELD_STATS },
+        },
+        required: ['ownerId', 'addresses', 'statuses'],
+        stats: FIELD_STATS,
+      };
+      const schemas = [
+        makeAggregatedSchema({
+          httpMethod: 'GET',
+          path: '/owners/{ownerId}',
+          responseSchemas: { '200': ownerSchema },
+        }),
+        makeAggregatedSchema({
+          id: 2,
+          httpMethod: 'POST',
+          path: '/owners',
+          responseSchemas: { '201': ownerSchema },
+        }),
+      ];
+
+      const registry = discoverDomainModels(schemas);
+      expect(registry.models.find((m) => m.name === 'Address')).toBeDefined();
+      expect(registry.models.find((m) => m.name === 'Status')).toBeDefined();
+      expect(registry.models.find((m) => m.name === 'Addres')).toBeUndefined();
+      expect(registry.models.find((m) => m.name === 'Statue')).toBeUndefined();
+    });
+
     it('names {error, message} shape as ErrorResponse, not after path entity', () => {
       // Pre-fix bug: this got named "User" because the path heuristic looked at
       // the first single-resource GET in the usages list — which happened to be

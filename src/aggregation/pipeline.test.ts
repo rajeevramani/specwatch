@@ -636,6 +636,27 @@ describe('inferEnums', () => {
     expect(result.items?.enum).toEqual(['blue', 'green', 'red']);
   });
 
+  it('passes array property names to item enum heuristics', () => {
+    const schema: InferredSchema = {
+      type: 'object',
+      properties: {
+        orderId: {
+          type: 'array',
+          items: {
+            type: 'string',
+            _observedValues: ['ord_1', 'ord_2'],
+            stats: makeStats(12, 12),
+          },
+          stats: makeStats(12, 12),
+        },
+      },
+      stats: makeStats(12, 12),
+    };
+    const result = inferEnums(schema, 12);
+    expect(result.properties?.orderId.items?.enum).toBeUndefined();
+    expect(result.properties?.orderId.items?._observedValues).toBeUndefined();
+  });
+
   it('recurses into oneOf variants', () => {
     const schema: InferredSchema = {
       type: 'string',

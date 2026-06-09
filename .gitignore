@@ -28,3 +28,6 @@ mockbank-openapi.yaml
 
 # Local bd state
 .beads/
+
+# Calibration run artifacts
+eval/calibration/.runs*/

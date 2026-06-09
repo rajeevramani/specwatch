@@ -38,22 +38,19 @@ interface EndpointEntry {
   responseHeaders: (HeaderEntry[] | undefined)[];
 }
 
-const NUMERIC_VALUE = /^\d+$/;
-
 /**
  * Pluralized parent segment → singular + Id.
  * "owners" → "ownerId", "users" → "userId", "events" → "eventId".
  * Falls back to "{parent}Id" if the parent isn't a known plural.
  */
-function paramNameFromParent(parent: string, isNumeric: boolean): string {
+function paramNameFromParent(parent: string): string {
   const lower = parent.toLowerCase();
   let singular = lower;
   // Reuse a small subset of the plural map from path-normalizer for parent→singular
   if (lower.endsWith('ies') && lower.length > 3) singular = lower.slice(0, -3) + 'y';
   else if (lower.endsWith('ses') && lower.length > 3) singular = lower.slice(0, -2);
   else if (lower.endsWith('s') && lower.length > 2) singular = lower.slice(0, -1);
-  const suffix = isNumeric ? 'Id' : 'Id'; // both string and numeric IDs use "Id" suffix
-  return singular + suffix;
+  return singular + 'Id';
 }
 
 /**
@@ -184,9 +181,7 @@ export function unifyEndpointPaths(endpointMap: Map<string, EndpointEntry>): voi
       // Unified path: replace last segment with a parameter named from parent
       const firstSegments = partition[0].entry.path.split('/');
       const parentSeg = firstSegments[firstSegments.length - 2];
-      const allLastSegments = partition.map(({ entry }) => entry.path.split('/').pop()!);
-      const allNumeric = allLastSegments.every((s) => NUMERIC_VALUE.test(s));
-      const paramName = paramNameFromParent(parentSeg, allNumeric);
+      const paramName = paramNameFromParent(parentSeg);
 
       const unifiedSegments = firstSegments.slice(0, -1).concat(`{${paramName}}`);
       const unifiedPath = unifiedSegments.join('/');
@@ -630,9 +625,9 @@ export function inferEnums(
     return { ...schema, properties: updatedProperties };
   }
 
-  // Array: recurse into items (item schemas inherit no field name)
+  // Array: recurse into items under the same property context.
   if (schema.type === 'array' && schema.items !== undefined) {
-    return { ...schema, items: inferEnums(schema.items, totalSamples) };
+    return { ...schema, items: inferEnums(schema.items, totalSamples, fieldName) };
   }
 
   return schema;

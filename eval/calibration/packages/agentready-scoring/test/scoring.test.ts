@@ -68,6 +68,13 @@ const SAMPLE_SPEC = {
   },
 };
 
+function signalScore(result: ScoreResult, categoryId: string, signalId: string): number | undefined {
+  return result.categories
+    .find((category) => category.id === categoryId)
+    ?.signals?.find((signal) => signal.id === signalId)
+    ?.score;
+}
+
 describe('@agentready/scoring', () => {
   it('exports scoreSpec as a callable', () => {
     expect(typeof scoreSpec).toBe('function');
@@ -146,5 +153,72 @@ describe('@agentready/scoring', () => {
     const sig = extractRuntimeSignals([]);
     expect(sig.present).toBe(false);
     expect(sig.opsWithData).toBe(0);
+  });
+
+  it('scores static response completeness by overlapping read fields, not field count', () => {
+    const spec = {
+      openapi: '3.1.0',
+      info: { title: 'Orders API', version: '1.0.0' },
+      paths: {
+        '/orders': {
+          post: {
+            operationId: 'createOrder',
+            summary: 'Create order',
+            description: 'Create an order.',
+            responses: {
+              '201': {
+                description: 'Created',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string' },
+                        status: { type: 'string' },
+                        extra: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        '/orders/{orderId}': {
+          get: {
+            operationId: 'getOrder',
+            summary: 'Get order',
+            description: 'Get an order.',
+            parameters: [
+              {
+                name: 'orderId',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'Order',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string' },
+                        status: { type: 'string' },
+                        total: { type: 'number' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(signalScore(scoreSpec(spec), 'au', 'static_response_completeness')).toBe(67);
   });
 });

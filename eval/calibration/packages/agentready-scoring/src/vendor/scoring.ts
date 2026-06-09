@@ -464,6 +464,100 @@ function schemaIsList(schema: any, spec: any, seen = new Set<any>()): boolean {
   return false;
 }
 
+interface StaticResponseCompleteness {
+  endpoint: string;
+  matchingRead: string;
+  writeFieldCount: number;
+  readFieldCount: number;
+  completeness: number;
+  missingFields: string[];
+}
+
+function successResponseSchema(op: any): any | undefined {
+  const responses = op?.responses ?? {};
+  const preferred = responses["200"] ?? responses["201"];
+  if (preferred) {
+    const schemas = collectResponseSchemas(preferred);
+    if (schemas.length > 0) return schemas[0];
+  }
+  for (const [code, response] of Object.entries<any>(responses)) {
+    if (!String(code).startsWith("2")) continue;
+    const schemas = collectResponseSchemas(response);
+    if (schemas.length > 0) return schemas[0];
+  }
+  return undefined;
+}
+
+function objectFieldNames(schema: any, spec: any, seen = new Set<any>()): string[] {
+  const resolved = resolveSchema(schema, spec, seen);
+  if (!resolved || typeof resolved !== "object") return [];
+  if (seen.has(resolved)) return [];
+  seen.add(resolved);
+
+  if (resolved.type === "object" && resolved.properties && typeof resolved.properties === "object") {
+    return Object.keys(resolved.properties);
+  }
+
+  for (const key of ["allOf", "anyOf", "oneOf"] as const) {
+    if (!Array.isArray(resolved[key])) continue;
+    const fields = new Set<string>();
+    for (const child of resolved[key]) {
+      for (const field of objectFieldNames(child, spec, seen)) fields.add(field);
+    }
+    if (fields.size > 0) return [...fields];
+  }
+
+  return [];
+}
+
+function findMatchingReadOp(write: OpEntry, ops: OpEntry[]): OpEntry | undefined {
+  const getOps = ops.filter((entry) => entry.method === "GET");
+  if (write.method === "PUT" || write.method === "PATCH") {
+    return getOps.find((entry) => entry.path === write.path);
+  }
+
+  if (write.method !== "POST") return undefined;
+
+  const writeSegments = write.path.split("/").filter(Boolean);
+  return getOps.find((entry) => {
+    const readSegments = entry.path.split("/").filter(Boolean);
+    if (readSegments.length !== writeSegments.length + 1) return false;
+    const prefixMatches = writeSegments.every((segment, i) => segment === readSegments[i]);
+    const extra = readSegments[readSegments.length - 1];
+    return prefixMatches && extra.startsWith("{") && extra.endsWith("}");
+  });
+}
+
+function analyzeStaticResponseCompleteness(
+  spec: any,
+  ops: OpEntry[],
+): StaticResponseCompleteness[] {
+  const out: StaticResponseCompleteness[] = [];
+  const writeOps = ops.filter((entry) => ["POST", "PUT", "PATCH"].includes(entry.method));
+
+  for (const write of writeOps) {
+    const read = findMatchingReadOp(write, ops);
+    if (!read) continue;
+
+    const writeFields = objectFieldNames(successResponseSchema(write.op), spec);
+    const readFields = objectFieldNames(successResponseSchema(read.op), spec);
+    if (writeFields.length === 0 || readFields.length === 0) continue;
+
+    const writeSet = new Set(writeFields);
+    const missingFields = readFields.filter((field) => !writeSet.has(field));
+    out.push({
+      endpoint: `${write.method} ${write.path}`,
+      matchingRead: `${read.method} ${read.path}`,
+      writeFieldCount: writeFields.length,
+      readFieldCount: readFields.length,
+      completeness: (readFields.length - missingFields.length) / readFields.length,
+      missingFields,
+    });
+  }
+
+  return out;
+}
+
 function schemaLooksLikeProblemDetails(schema: any, spec: any, seen = new Set<any>()): boolean {
   const resolved = resolveSchema(schema, spec, seen);
   if (!resolved || typeof resolved !== "object") return false;
@@ -1052,6 +1146,15 @@ export function scoreAU(ctx: DimensionInput): DimensionResult {
     if (op.operationId && op.summary && String(op.summary).length <= 120) toolReady++;
   }
   const toolScore = sig(ratio(toolReady, opCount));
+  const staticCompleteness = analyzeStaticResponseCompleteness(spec, ops);
+  const staticCompletenessScore =
+    staticCompleteness.length === 0
+      ? undefined
+      : sig(
+          staticCompleteness.reduce((sum, entry) => sum + entry.completeness, 0) /
+            staticCompleteness.length,
+        );
+  const staticThinResponses = staticCompleteness.filter((entry) => entry.completeness < 0.5);
 
   sigs.push({
     id: "complexity",
@@ -1062,6 +1165,13 @@ export function scoreAU(ctx: DimensionInput): DimensionResult {
   sigs.push({ id: "pagination", name: "Pagination on list endpoints", score: pageScore });
   sigs.push({ id: "idempotency_safety", name: "Idempotency for mutating ops", score: idemScore });
   sigs.push({ id: "tool_calling", name: "Tool-calling alignment", score: toolScore });
+  if (staticCompletenessScore !== undefined) {
+    sigs.push({
+      id: "static_response_completeness",
+      name: "Static write/read response completeness",
+      score: staticCompletenessScore,
+    });
+  }
 
   findings.push({
     severity: sevForScore(complexityScore),
@@ -1089,6 +1199,15 @@ export function scoreAU(ctx: DimensionInput): DimensionResult {
       severity: "fail",
       message: `Duplicate operationIds after case normalization: ${opIds.length - uniqueIds.size}`,
     });
+  if (staticCompletenessScore !== undefined) {
+    findings.push({
+      severity: sevForScore(staticCompletenessScore),
+      message:
+        staticThinResponses.length === 0
+          ? `Write responses statically match matching read responses across ${staticCompleteness.length} operation(s)`
+          : `${staticThinResponses.length} write response(s) look thin compared with their matching read operation`,
+    });
+  }
 
   // Runtime evidence (Specwatch): thin write responses (a POST returns far fewer
   // fields than the matching GET) force agents into extra reads. Observed

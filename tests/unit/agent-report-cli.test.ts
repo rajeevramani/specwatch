@@ -22,6 +22,13 @@ describe('agent-report CLI command', () => {
     expect(nameOpt).toBeDefined();
   });
 
+  it('has evidence output options', () => {
+    const program = createProgram();
+    const agentReportCmd = program.commands.find((c) => c.name() === 'agent-report')!;
+    expect(agentReportCmd.options.find((o) => o.long === '--spec')).toBeDefined();
+    expect(agentReportCmd.options.find((o) => o.long === '--output')).toBeDefined();
+  });
+
   it('errors on human session with clear message', async () => {
     // Test the validation logic: consumer !== 'agent' should produce the right error
     const { SpecwatchError } = await import('../../src/cli/errors.js');

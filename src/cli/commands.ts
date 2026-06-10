@@ -867,7 +867,8 @@ export function createProgram(): Command {
         const sequenceAnalysis = detectSequences(db, targetId);
         const sampleRepo = new SampleRepository(db);
         const samples = sampleRepo.listBySession(targetId);
-        const completenessReport = isJsonRpcSession(samples)
+        const jsonRpc = isJsonRpcSession(samples);
+        const completenessReport = jsonRpc
           ? analyzeJsonRpcCompleteness(samples)
           : analyzeCompleteness(schemas);
 
@@ -921,9 +922,15 @@ export function createProgram(): Command {
             specSource: specPath,
             specContent,
             specOperations,
+            isJsonRpc: jsonRpc,
           });
           writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
           success(`Wrote agent evidence to ${evidenceFile}`);
+          if (jsonRpc) {
+            warn(
+              'JSON-RPC session: operation-level evidence is REST-only in schema v1 — the evidence file carries a run-level warning. Use the terminal report for JSON-RPC findings.',
+            );
+          }
         }
 
         process.stdout.write(reportOutput + '\n');

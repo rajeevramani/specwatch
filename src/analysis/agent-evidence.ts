@@ -255,6 +255,16 @@ function collectNextSteps(sequences: OperationSequence[]): Map<string, FollowUpO
 const LOW_SAMPLE_THRESHOLD = 10;
 
 /**
+ * A follow-up must repeat at least this often before document_common_next_step
+ * fires. A single observed pair is not "commonly called" — in a multi-endpoint
+ * run nearly every operation has SOME one-off follower, so a threshold of 1
+ * would emit the recommendation for almost everything. The evidence field
+ * (common_follow_up_operations) still carries all follow-ups with counts;
+ * only the recommendation gates on repetition.
+ */
+const MIN_FOLLOW_UP_COUNT = 2;
+
+/**
  * Build the phase-1 recommendation set for an operation.
  *
  * Phase-1 emits exactly three kinds — `enrich_write_response`,
@@ -307,7 +317,11 @@ function buildRecommendations(
 
   // document_common_next_step: agents repeatedly called ANOTHER operation after
   // this one — driven by the observed follow-up data, not by verification loops.
-  if (acc.commonFollowUpOperations.length > 0) {
+  // Follow-ups are sorted by count desc, so checking the first covers all.
+  if (
+    acc.commonFollowUpOperations.length > 0 &&
+    acc.commonFollowUpOperations[0].count >= MIN_FOLLOW_UP_COUNT
+  ) {
     const next = acc.commonFollowUpOperations[0].operation;
     recommendations.push({
       kind: 'document_common_next_step',

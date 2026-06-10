@@ -119,7 +119,11 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
     getAccumulator(accumulators, parsed.method, parsed.path).observedCount = tool.count;
   }
 
+  // Operation-level evidence is REST-only in v1: JSON-RPC completeness
+  // endpoints (method 'tools/call') must not leak into operations[] — they
+  // stay terminal-report-level, consistent with the run-level warning below.
   for (const endpoint of opts.completenessReport.endpoints) {
+    if (!HTTP_METHODS.has(endpoint.method.toUpperCase())) continue;
     const acc = getAccumulator(accumulators, endpoint.method, endpoint.path);
     acc.responseCompleteness = round(endpoint.completenessScore);
     acc.missingResponseFields = endpoint.missingFields;
@@ -137,10 +141,11 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
   // therefore surfaced at the report level (redundantCalls) rather than folded
   // into per-operation evidence here (deferred to a later phase).
   for (const seq of opts.sequenceAnalysis.sequences) {
+    if (!HTTP_METHODS.has(seq.fromMethod.toUpperCase())) continue;
     if (seq.pattern === 'verification_loop') {
       const acc = getAccumulator(accumulators, seq.fromMethod, seq.fromPath);
       acc.verificationLoopCount += seq.count;
-    } else if (seq.pattern === 'retry' && HTTP_METHODS.has(seq.fromMethod.toUpperCase())) {
+    } else if (seq.pattern === 'retry') {
       const acc = getAccumulator(accumulators, seq.fromMethod, seq.fromPath);
       acc.wastedRequestCount += seq.count;
     }

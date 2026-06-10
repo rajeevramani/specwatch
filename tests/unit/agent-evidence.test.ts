@@ -221,26 +221,51 @@ describe('agent evidence builder', () => {
     expect(allKinds).not.toContain('reduce_redundant_call');
   });
 
-  it('adds a run-level REST-only warning for JSON-RPC sessions', () => {
+  it('adds a run-level REST-only warning for JSON-RPC sessions and keeps operations[] empty', () => {
+    // A realistic JSON-RPC run: tool usage, a JSON-RPC verification loop, AND
+    // JSON-RPC completeness endpoints (method 'tools/call'). None of these may
+    // leak into operations[] — per-operation evidence is REST-only in v1.
     const analysis: SequenceAnalysis = {
-      sequences: [],
+      sequences: [
+        {
+          fromMethod: 'tools/call',
+          fromPath: 'tools/call:cp_create_cluster',
+          toMethod: 'tools/call',
+          toPath: 'tools/call:cp_get_cluster',
+          avgDelayMs: 50,
+          count: 3,
+          pattern: 'verification_loop',
+        },
+      ],
       verificationLoops: [],
       totalRequests: 4,
       wastedRequests: 0,
       redundantCalls: [],
       toolUsage: [{ operationKey: 'tools/call:cp_create_cluster', count: 4, isRedundant: false }],
     };
+    const completeness: CompletenessReport = {
+      endpoints: [
+        {
+          method: 'tools/call',
+          path: 'tools/call:cp_create_cluster',
+          writeFieldCount: 1,
+          readFieldCount: 4,
+          completenessScore: 0.25,
+          missingFields: ['configuration', 'filter_type'],
+        },
+      ],
+      thinResponses: [],
+      avgCompleteness: 0.25,
+    };
 
     const evidence = buildAgentEvidence({
       runName: 'mcp-run',
       sampleCount: 4,
       sequenceAnalysis: analysis,
-      completenessReport: { endpoints: [], thinResponses: [], avgCompleteness: 0 },
+      completenessReport: completeness,
       isJsonRpc: true,
     });
 
-    // JSON-RPC keys are not method+path shaped, so operations[] is empty —
-    // the run-level warning is what tells the consumer why.
     expect(evidence.operations).toEqual([]);
     expect(evidence.warnings).toEqual([JSON_RPC_EVIDENCE_WARNING]);
 
@@ -248,7 +273,7 @@ describe('agent evidence builder', () => {
       runName: 'rest-run',
       sampleCount: 4,
       sequenceAnalysis: analysis,
-      completenessReport: { endpoints: [], thinResponses: [], avgCompleteness: 0 },
+      completenessReport: completeness,
     });
     expect(restEvidence.warnings).toBeUndefined();
   });

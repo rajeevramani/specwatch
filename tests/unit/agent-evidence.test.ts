@@ -364,6 +364,56 @@ describe('phase-1 recommendation rules', () => {
     expect(recs.map((r) => r.kind)).not.toContain('enrich_write_response');
   });
 
+  it('document_common_next_step does NOT fire for a one-off follow-up (count below threshold)', () => {
+    const analysis = emptyAnalysis({
+      sequences: [
+        {
+          fromMethod: 'POST',
+          fromPath: '/a',
+          toMethod: 'GET',
+          toPath: '/b',
+          avgDelayMs: 100,
+          count: 1,
+          pattern: 'unknown',
+        },
+      ],
+    });
+    const evidence = buildAgentEvidence({
+      runName: 'r',
+      sampleCount: 50,
+      sequenceAnalysis: analysis,
+      completenessReport: emptyCompleteness(),
+    });
+    const post = evidence.operations.find((o) => o.operation_key === 'POST /a');
+    // The one-off still appears in the evidence field with its count...
+    expect(post?.common_follow_up_operations).toEqual([{ operation: 'GET /b', count: 1 }]);
+    // ...but the recommendation requires repetition.
+    expect(post?.recommendations.map((r) => r.kind)).not.toContain('document_common_next_step');
+  });
+
+  it('document_common_next_step fires at the repetition threshold (count = 2)', () => {
+    const analysis = emptyAnalysis({
+      sequences: [
+        {
+          fromMethod: 'POST',
+          fromPath: '/a',
+          toMethod: 'GET',
+          toPath: '/b',
+          avgDelayMs: 100,
+          count: 2,
+          pattern: 'unknown',
+        },
+      ],
+    });
+    const recs = recsFor('POST /a', {
+      runName: 'r',
+      sampleCount: 50,
+      sequenceAnalysis: analysis,
+      completenessReport: emptyCompleteness(),
+    });
+    expect(recs.map((r) => r.kind)).toContain('document_common_next_step');
+  });
+
   it('enrich_write_response fires on low completeness OR on verification loops', () => {
     const thinOnly = recsFor('POST /p', {
       runName: 'r',

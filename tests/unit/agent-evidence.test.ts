@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildAgentEvidence } from '../../src/analysis/agent-evidence.js';
+import {
+  buildAgentEvidence,
+  JSON_RPC_EVIDENCE_WARNING,
+} from '../../src/analysis/agent-evidence.js';
 import { collectOpenApiOperations } from '../../src/analysis/spec-mapper.js';
 import type { CompletenessReport } from '../../src/analysis/completeness.js';
 import type { SequenceAnalysis } from '../../src/analysis/sequences.js';
@@ -216,6 +219,38 @@ describe('agent evidence builder', () => {
 
     const allKinds = evidence.operations.flatMap((o) => o.recommendations.map((r) => r.kind));
     expect(allKinds).not.toContain('reduce_redundant_call');
+  });
+
+  it('adds a run-level REST-only warning for JSON-RPC sessions', () => {
+    const analysis: SequenceAnalysis = {
+      sequences: [],
+      verificationLoops: [],
+      totalRequests: 4,
+      wastedRequests: 0,
+      redundantCalls: [],
+      toolUsage: [{ operationKey: 'tools/call:cp_create_cluster', count: 4, isRedundant: false }],
+    };
+
+    const evidence = buildAgentEvidence({
+      runName: 'mcp-run',
+      sampleCount: 4,
+      sequenceAnalysis: analysis,
+      completenessReport: { endpoints: [], thinResponses: [], avgCompleteness: 0 },
+      isJsonRpc: true,
+    });
+
+    // JSON-RPC keys are not method+path shaped, so operations[] is empty —
+    // the run-level warning is what tells the consumer why.
+    expect(evidence.operations).toEqual([]);
+    expect(evidence.warnings).toEqual([JSON_RPC_EVIDENCE_WARNING]);
+
+    const restEvidence = buildAgentEvidence({
+      runName: 'rest-run',
+      sampleCount: 4,
+      sequenceAnalysis: analysis,
+      completenessReport: { endpoints: [], thinResponses: [], avgCompleteness: 0 },
+    });
+    expect(restEvidence.warnings).toBeUndefined();
   });
 
   it('maps evidence to OpenAPI operation IDs and spec locations', () => {

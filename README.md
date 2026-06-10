@@ -219,6 +219,34 @@ specwatch agent-report --name "my-agent"
 specwatch agent-report --name "my-agent" --explain   # LLM-powered explanations
 ```
 
+#### Evidence export (`--output`, `--spec`)
+
+Write a machine-readable evidence artifact (`specwatch.agent_evidence.v1`) for tools
+like Agent Ready Score, alongside the terminal report:
+
+```bash
+# Evidence keyed by observed method/path only
+specwatch agent-report --name "my-agent" --output evidence.json
+
+# Map findings to a source OpenAPI spec (operationId, spec_location)
+specwatch agent-report --name "my-agent" --spec openapi.yaml --output evidence.json
+```
+
+No spec on hand? Use the two-step path — export the spec Specwatch inferred, then
+feed it back:
+
+```bash
+specwatch export --name "my-agent" -o generated.yaml
+specwatch agent-report --name "my-agent" --spec generated.yaml --output evidence.json
+```
+
+Note: a spec inferred from the same traffic matches trivially — treat self-mapped
+`spec_location` pointers as navigation aids, not contract verification.
+
+**Scope:** operation-level evidence is REST-only in schema v1. JSON-RPC (MCP-style)
+sessions produce an evidence file with a run-level warning and no per-operation
+entries — use the terminal report for JSON-RPC findings.
+
 ### `specwatch investigate`
 
 Deep-dive into redundant calls for a specific operation.

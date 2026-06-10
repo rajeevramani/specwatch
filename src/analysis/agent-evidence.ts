@@ -13,6 +13,18 @@ import {
 
 export const AGENT_EVIDENCE_SCHEMA_VERSION = 'specwatch.agent_evidence.v1';
 
+/**
+ * Run-level warning emitted for JSON-RPC (MCP-style) sessions. Operation-level
+ * evidence is REST-only in schema v1: JSON-RPC operation keys (tools/call:*)
+ * are not method+path shaped, so they do not map into operations[]. JSON-RPC
+ * redundancy stays report-level (windowed detection overcounts duplicates);
+ * per-operation JSON-RPC evidence is deferred.
+ */
+export const JSON_RPC_EVIDENCE_WARNING =
+  'JSON-RPC session: operation-level evidence is REST-only in schema v1. ' +
+  'JSON-RPC operations (tools/call:*) are not included in operations[]; ' +
+  'use the terminal agent-report for JSON-RPC redundancy findings.';
+
 /** Standard HTTP methods — used to scope REST-only signals (excludes JSON-RPC keys). */
 const HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -81,6 +93,8 @@ export interface BuildAgentEvidenceOptions {
   /** Raw spec text already read by the caller — hashed here to avoid a second read. */
   specContent?: string;
   specOperations?: OpenApiOperationRef[];
+  /** True for JSON-RPC (MCP-style) sessions — adds a run-level REST-only warning. */
+  isJsonRpc?: boolean;
 }
 
 interface OperationAccumulator {
@@ -199,6 +213,9 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
   }
   if (unmatched.length > 0) {
     evidence.unmatched_observations = unmatched;
+  }
+  if (opts.isJsonRpc) {
+    evidence.warnings = [...(evidence.warnings ?? []), JSON_RPC_EVIDENCE_WARNING];
   }
 
   return evidence;

@@ -31,6 +31,12 @@ export interface AgentEvidenceRecommendation {
   message: string;
 }
 
+/** A follow-up operation with its observed frequency, so consumers can judge signal strength. */
+export interface FollowUpOperation {
+  operation: string;
+  count: number;
+}
+
 export interface AgentEvidenceOperation {
   operation_key: string;
   method: string;
@@ -42,7 +48,7 @@ export interface AgentEvidenceOperation {
   verification_loop_count: number;
   wasted_request_count: number;
   missing_response_fields: string[];
-  common_follow_up_operations: string[];
+  common_follow_up_operations: FollowUpOperation[];
   recommendations: AgentEvidenceRecommendation[];
   warnings?: string[];
 }
@@ -86,7 +92,7 @@ interface OperationAccumulator {
   verificationLoopCount: number;
   wastedRequestCount: number;
   missingResponseFields: string[];
-  commonFollowUpOperations: string[];
+  commonFollowUpOperations: FollowUpOperation[];
   warnings: string[];
 }
 
@@ -223,7 +229,7 @@ function getAccumulator(
   return created;
 }
 
-function collectNextSteps(sequences: OperationSequence[]): Map<string, string[]> {
+function collectNextSteps(sequences: OperationSequence[]): Map<string, FollowUpOperation[]> {
   const byOperation = new Map<string, Map<string, number>>();
   for (const seq of sequences) {
     const fromKey = `${seq.fromMethod.toUpperCase()} ${seq.fromPath}`;
@@ -235,11 +241,11 @@ function collectNextSteps(sequences: OperationSequence[]): Map<string, string[]>
     byOperation.set(fromKey, counts);
   }
 
-  const result = new Map<string, string[]>();
+  const result = new Map<string, FollowUpOperation[]>();
   for (const [operationKey, counts] of byOperation) {
     const sorted = Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1])
-      .map(([key]) => key);
+      .map(([operation, count]) => ({ operation, count }));
     result.set(operationKey, sorted);
   }
   return result;
@@ -302,7 +308,7 @@ function buildRecommendations(
   // document_common_next_step: agents repeatedly called ANOTHER operation after
   // this one — driven by the observed follow-up data, not by verification loops.
   if (acc.commonFollowUpOperations.length > 0) {
-    const next = acc.commonFollowUpOperations[0];
+    const next = acc.commonFollowUpOperations[0].operation;
     recommendations.push({
       kind: 'document_common_next_step',
       severity: 'low',

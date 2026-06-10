@@ -91,11 +91,63 @@ describe('agent evidence builder', () => {
       // reduce_redundant_call recommendation does not fire.
       wasted_request_count: 0,
       missing_response_fields: ['name', 'price', 'status'],
-      common_follow_up_operations: ['GET /products/{id}'],
+      common_follow_up_operations: [{ operation: 'GET /products/{id}', count: 3 }],
     });
     expect(post?.recommendations.map((r) => r.kind)).toEqual([
       'enrich_write_response',
       'document_common_next_step',
+    ]);
+  });
+
+  it('carries follow-up counts, ordered by observed frequency, excluding self-follow-ups', () => {
+    const analysis: SequenceAnalysis = {
+      sequences: [
+        {
+          fromMethod: 'POST',
+          fromPath: '/orders',
+          toMethod: 'GET',
+          toPath: '/orders/{id}',
+          avgDelayMs: 100,
+          count: 2,
+          pattern: 'verification_loop',
+        },
+        {
+          fromMethod: 'POST',
+          fromPath: '/orders',
+          toMethod: 'GET',
+          toPath: '/invoices',
+          avgDelayMs: 100,
+          count: 5,
+          pattern: 'unknown',
+        },
+        {
+          fromMethod: 'POST',
+          fromPath: '/orders',
+          toMethod: 'POST',
+          toPath: '/orders',
+          avgDelayMs: 100,
+          count: 4,
+          pattern: 'unknown',
+        },
+      ],
+      verificationLoops: [],
+      totalRequests: 12,
+      wastedRequests: 0,
+      redundantCalls: [],
+      toolUsage: [{ operationKey: 'POST /orders', count: 8, isRedundant: false }],
+    };
+
+    const evidence = buildAgentEvidence({
+      runName: 'r',
+      sampleCount: 12,
+      sequenceAnalysis: analysis,
+      completenessReport: { endpoints: [], thinResponses: [], avgCompleteness: 0 },
+    });
+
+    const post = evidence.operations.find((op) => op.operation_key === 'POST /orders');
+    expect(post?.common_follow_up_operations).toEqual([
+      { operation: 'GET /invoices', count: 5 },
+      { operation: 'GET /orders/{id}', count: 2 },
     ]);
   });
 

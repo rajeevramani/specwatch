@@ -952,9 +952,12 @@ export function createProgram(): Command {
     .description('Analyze agent traffic patterns and API friendliness')
     .argument('[session-id]', 'Session ID (defaults to latest completed)')
     .option('--name <name>', 'Session name')
+    .option('--format <format>', 'Output format: json (default) or human', 'json')
+    .option('--human', 'Human-readable tables (alias for --format human)')
+    .option('--pretty', 'Alias for --human')
     .option('--explain', 'Use LLM for richer explanations')
     .option('--spec <file>', 'OpenAPI spec to map observed operations against')
-    .option('-o, --output <file>', 'Write machine-readable agent evidence JSON')
+    .option('-o, --output <file>', 'Write machine-readable agent evidence JSON to a file')
     .action(
       async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
         try {
@@ -978,6 +981,18 @@ export function createProgram(): Command {
               'Start a session with: specwatch start <url> --consumer agent',
             );
           }
+
+          // Resolve output mode. Default is the machine channel (evidence JSON on
+          // stdout); --human (alias --format human / --pretty) restores the tables.
+          const formatOpt = (opts['format'] as string) ?? 'json';
+          if (formatOpt !== 'json' && formatOpt !== 'human') {
+            throw new SpecwatchError(
+              `Invalid --format value: '${formatOpt}'.`,
+              'Use --format json or --format human.',
+            );
+          }
+          const humanMode =
+            opts['human'] === true || opts['pretty'] === true || formatOpt === 'human';
 
           // Get aggregated schemas
           const schemas = schemaRepo.listBySessionLatestSnapshot(targetId);
@@ -1019,48 +1034,61 @@ export function createProgram(): Command {
             }
           }
 
-          // Format and output
           const sessionName = session.name ?? session.id.slice(0, 8);
-          const reportOutput = formatAgentReport(
-            sessionName,
+
+          // Build the evidence once — it is the default stdout payload AND the
+          // `-o` file payload, so it must be produced regardless of `-o`/`--spec`.
+          const specPath = opts['spec'] as string | undefined;
+          const { readFileSync } = await import('node:fs');
+          // Read the spec once; reuse the same bytes for parsing and hashing.
+          const specContent = specPath ? readFileSync(specPath, 'utf8') : undefined;
+          const specOperations =
+            specContent !== undefined
+              ? collectOpenApiOperations(parseOpenApiSpec(specContent, specPath))
+              : undefined;
+          const evidence = buildAgentEvidence({
+            runName: sessionName,
+            sampleCount: session.sampleCount,
             sequenceAnalysis,
             completenessReport,
-            session.sampleCount,
-            phaseAnalysis,
-            investigationReport,
-            samples,
-          );
+            specSource: specPath,
+            specContent,
+            specOperations,
+            isJsonRpc: jsonRpc,
+          });
+          const evidenceJson = `${JSON.stringify(evidence, null, 2)}\n`;
 
+          // `-o` still writes the evidence JSON to a file; status goes to stderr.
           const evidenceFile = opts['output'] as string | undefined;
           if (evidenceFile) {
-            const specPath = opts['spec'] as string | undefined;
-            // Read the spec once; reuse the same bytes for parsing and hashing.
-            const { readFileSync, writeFileSync } = await import('node:fs');
-            const specContent = specPath ? readFileSync(specPath, 'utf8') : undefined;
-            const specOperations =
-              specContent !== undefined
-                ? collectOpenApiOperations(parseOpenApiSpec(specContent, specPath))
-                : undefined;
-            const evidence = buildAgentEvidence({
-              runName: sessionName,
-              sampleCount: session.sampleCount,
-              sequenceAnalysis,
-              completenessReport,
-              specSource: specPath,
-              specContent,
-              specOperations,
-              isJsonRpc: jsonRpc,
-            });
-            writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+            writeFileSync(evidenceFile, evidenceJson, 'utf8');
             success(`Wrote agent evidence to ${evidenceFile}`);
-            if (jsonRpc) {
-              warn(
-                'JSON-RPC session: operation-level evidence is REST-only in schema v1 — the evidence file carries a run-level warning. Use the terminal report for JSON-RPC findings.',
-              );
-            }
           }
 
-          process.stdout.write(reportOutput + '\n');
+          // The REST-only caveat is relevant whenever JSON evidence is emitted
+          // (file or stdout). It goes to stderr so stdout JSON stays clean.
+          if (jsonRpc && (evidenceFile || !humanMode)) {
+            warn(
+              'JSON-RPC session: operation-level evidence is REST-only in schema v1 — the evidence carries a run-level warning. Use --human for the JSON-RPC terminal report.',
+            );
+          }
+
+          if (humanMode) {
+            // Human tables (capped CALL SEQUENCE); full detail lives in the JSON.
+            const reportOutput = formatAgentReport(
+              sessionName,
+              sequenceAnalysis,
+              completenessReport,
+              session.sampleCount,
+              phaseAnalysis,
+              investigationReport,
+              samples,
+            );
+            process.stdout.write(reportOutput + '\n');
+          } else {
+            // Default: machine channel — evidence JSON only, zero non-JSON bytes.
+            process.stdout.write(evidenceJson);
+          }
         } catch (err) {
           handleError(err);
         }

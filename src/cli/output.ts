@@ -236,6 +236,9 @@ function loopPatternLabel(
   return `${loop.fromMethod} ${loop.fromPath} → ${loop.toMethod} ${loop.toPath}`;
 }
 
+/** Human CALL SEQUENCE table is a capped summary; JSON carries the full detail. */
+const CALL_SEQUENCE_CAP = 15;
+
 export function formatAgentReport(
   sessionName: string,
   sequenceAnalysis: SequenceAnalysis,
@@ -318,11 +321,14 @@ export function formatAgentReport(
     if (allPhaseSamples.length > 0) {
       lines.push('');
       lines.push('CALL SEQUENCE');
+      // The human table is a capped summary; full per-sample detail is lossless
+      // in the machine channel (`agent-report` default JSON / `investigate --json`).
+      const shown = Math.min(allPhaseSamples.length, CALL_SEQUENCE_CAP);
       const seqTable = new Table({
         head: ['#', 'Tool', 'Phase', 'Status'],
         style: { head: ['cyan'] },
       });
-      for (let i = 0; i < allPhaseSamples.length; i++) {
+      for (let i = 0; i < shown; i++) {
         const ps = allPhaseSamples[i];
         const label = isJsonRpc
           ? (ps.toolName ?? ps.operationKey).replace(/^tools\/call:/, '')
@@ -331,6 +337,11 @@ export function formatAgentReport(
         seqTable.push([(i + 1).toString(), label, ps.phase, status]);
       }
       lines.push(seqTable.toString());
+      if (allPhaseSamples.length > CALL_SEQUENCE_CAP) {
+        lines.push(
+          `  … and ${allPhaseSamples.length - CALL_SEQUENCE_CAP} more calls (use --format json for the full per-sample detail)`,
+        );
+      }
     }
   }
 

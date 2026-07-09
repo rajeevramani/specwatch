@@ -75,6 +75,7 @@ export function App({ model, onQuit }: AppProps) {
   const { exit } = useApp();
   const [, force] = useReducer((n: number) => n + 1, 0);
   const [now, setNow] = useState(model.state.startedAt);
+  const [scrollOffset, setScrollOffset] = useState(0);
 
   // Re-render on model changes.
   useEffect(() => model.onChange(force), [model]);
@@ -85,17 +86,30 @@ export function App({ model, onQuit }: AppProps) {
     return () => clearInterval(t);
   }, []);
 
+  const s = model.state;
+  const rows = [...s.endpoints.values()].sort((a, b) => b.hits - a.hits);
+  // Windowed scroll: the viewport shows MAX_ROWS rows starting at scrollOffset.
+  // Clamp against the current row count so the window stays valid as endpoints
+  // appear/disappear under a live-updating table.
+  const maxOffset = Math.max(0, rows.length - MAX_ROWS);
+  const offset = Math.min(scrollOffset, maxOffset);
+  const shown = rows.slice(offset, offset + MAX_ROWS);
+  const hiddenAbove = offset;
+  const hiddenBelow = rows.length - (offset + shown.length);
+
   useInput((input, key) => {
     if (input === 'q' || (key.ctrl && input === 'c')) {
       exit();
       onQuit();
+      return;
+    }
+    // Scroll the endpoint viewport. Up/Down arrows or k/j (vim-style).
+    if (key.downArrow || input === 'j') {
+      setScrollOffset((o) => Math.min(o + 1, maxOffset));
+    } else if (key.upArrow || input === 'k') {
+      setScrollOffset((o) => Math.max(o - 1, 0));
     }
   });
-
-  const s = model.state;
-  const rows = [...s.endpoints.values()].sort((a, b) => b.hits - a.hits);
-  const shown = rows.slice(0, MAX_ROWS);
-  const hidden = rows.length - shown.length;
 
   return (
     <Box flexDirection="column">
@@ -115,15 +129,15 @@ export function App({ model, onQuit }: AppProps) {
       <Box marginTop={1}>
         <Text dimColor>Uptime </Text>
         <Text>{fmtUptime(now - s.startedAt)}</Text>
-        <Text dimColor>   Endpoints </Text>
+        <Text dimColor> Endpoints </Text>
         <Text>{s.endpoints.size}</Text>
-        <Text dimColor>   Samples </Text>
+        <Text dimColor> Samples </Text>
         <Text color="green">{s.sampleCount}</Text>
         {s.maxSamples !== undefined && <Text dimColor>/{s.maxSamples}</Text>}
-        {s.skippedCount > 0 && <Text dimColor>   Skipped {s.skippedCount}</Text>}
+        {s.skippedCount > 0 && <Text dimColor> Skipped {s.skippedCount}</Text>}
         {s.autoAggregate && (
           <Text>
-            <Text dimColor>   Snapshot </Text>
+            <Text dimColor> Snapshot </Text>
             <Text color="yellow">{s.snapshot}</Text>
           </Text>
         )}
@@ -160,18 +174,27 @@ export function App({ model, onQuit }: AppProps) {
         </Box>
       </Box>
 
-      {/* Rows */}
+      {/* Rows (windowed viewport — scroll with ↑/↓ or k/j) */}
       {shown.length === 0 ? (
         <Box>
           <Text dimColor>Waiting for traffic… point your client at {s.proxyUrl}</Text>
         </Box>
       ) : (
-        shown.map((row) => <Row key={row.key} row={row} />)
-      )}
-      {hidden > 0 && (
-        <Box>
-          <Text dimColor>…and {hidden} more</Text>
-        </Box>
+        <>
+          {hiddenAbove > 0 && (
+            <Box>
+              <Text dimColor>▲ {hiddenAbove} more above</Text>
+            </Box>
+          )}
+          {shown.map((row) => (
+            <Row key={row.key} row={row} />
+          ))}
+          {hiddenBelow > 0 && (
+            <Box>
+              <Text dimColor>▼ {hiddenBelow} more below</Text>
+            </Box>
+          )}
+        </>
       )}
 
       {/* Footer */}
@@ -179,7 +202,9 @@ export function App({ model, onQuit }: AppProps) {
         {s.lastMessage ? (
           <Text color="yellow">{s.lastMessage}</Text>
         ) : (
-          <Text dimColor>q or Ctrl+C — stop & aggregate</Text>
+          <Text dimColor>
+            {rows.length > MAX_ROWS ? '↑/↓ or j/k scroll   ' : ''}q or Ctrl+C — stop & aggregate
+          </Text>
         )}
       </Box>
     </Box>

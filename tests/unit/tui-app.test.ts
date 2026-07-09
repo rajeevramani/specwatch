@@ -1,8 +1,8 @@
 /**
  * Unit tests for the live-capture Ink dashboard (App). Uses ink-testing-library
  * to render the component over a DashboardModel and assert on the frame text.
- * Locks the existing prototype behavior (S1 baseline) before later slices add
- * scrolling (S2) and hotkeys (S3).
+ * Locks the live-dashboard behavior; the windowed-scroll assertions here match
+ * the S2 viewport (dedicated scroll tests live in tui-scroll.test.ts).
  */
 
 import React from 'react';
@@ -68,7 +68,7 @@ describe('TUI App (live dashboard)', () => {
     expect(lastFrame()).toContain('/100');
   });
 
-  it('caps the table at 15 rows and shows an "…and N more" affordance (current behavior)', () => {
+  it('windows the table at 15 rows and shows a "N more below" affordance at the top of the scroll', () => {
     const model = makeModel();
     for (let i = 0; i < 20; i++) {
       // decreasing hits so sort order is stable and deterministic
@@ -78,8 +78,10 @@ describe('TUI App (live dashboard)', () => {
     }
     const { lastFrame } = renderApp(model);
     const frame = lastFrame()!;
-    expect(frame).toContain('…and 5 more');
-    // top endpoint (most hits) is shown, the least-hit one is hidden
+    expect(frame).toContain('▼ 5 more below');
+    // at offset 0 there is nothing hidden above
+    expect(frame).not.toContain('more above');
+    // top endpoint (most hits) is shown, the least-hit one is below the window
     expect(frame).toContain('/r00');
     expect(frame).not.toContain('/r19');
   });

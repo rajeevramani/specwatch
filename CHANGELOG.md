@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-07-09
+
+### Breaking (agent CLI)
+
+- **`specwatch agent-report` now emits machine-readable AgentEvidence JSON on stdout by default** for `--consumer agent` sessions (schema `specwatch.agent_evidence.v1`). It previously printed human-readable tables to stdout. Use `--human` (or `--format human`, or `--pretty`) to restore the tables. `-o <file>` is unchanged (still writes the evidence JSON to a file); with `-o` and no `--human`, stdout also stays JSON. Any script that parsed the old table output from stdout must switch to `--human` or consume the JSON. No deprecation window — the agent surface is young (introduced in the 0.3.x line) and carried no stable-contract promise.
+
+### Added
+
+- **Live capture TUI.** On a TTY, `specwatch start <url>` (human sessions) renders a live dashboard: uptime, endpoint/sample counts, and a hit-sorted, color-coded endpoint table — plus a samples-toward-max progress bar when `--max-samples` is set and a snapshot counter when `--auto-aggregate` is on. Piped stdout, `--quiet`, or `--consumer agent` fall back to the previous line printer (aggregation summary byte-identical). Scroll long endpoint tables with `↑`/`↓` or `j`/`k`; hotkeys: `a` aggregate-now, `e` export the current snapshot to a YAML file, `q` stop & aggregate.
+- **`specwatch investigate --json`.** Emit the redundant-call investigation as a pinned snake_case contract (schema `specwatch.investigation.v1`). Without `--json`, human output is unchanged.
+- **`specwatch agent-report --format json|human`**, plus `--human` and `--pretty` aliases.
+
 ## [0.2.0] - 2026-03-15
 
 ### Changed

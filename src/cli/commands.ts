@@ -33,7 +33,11 @@ import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/com
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
 import { buildAgentEvidence } from '../analysis/agent-evidence.js';
 import { collectOpenApiOperations, parseOpenApiSpec } from '../analysis/spec-mapper.js';
-import { extractJsonRpcFromBody, isJsonRpcSession, unwrapMcpResponse } from '../analysis/jsonrpc.js';
+import {
+  extractJsonRpcFromBody,
+  isJsonRpcSession,
+  unwrapMcpResponse,
+} from '../analysis/jsonrpc.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
 import { discoverDomainModels } from '../export/domain-models.js';
 import {
@@ -51,8 +55,18 @@ import {
   formatSnapshotList,
   formatAgentReport,
   formatInvestigation,
+  isInteractive,
+  isQuiet,
+  shouldUseTui,
 } from './output.js';
-import { SpecwatchError, noActiveSessionError, sessionNotFoundError, sessionNameNotFoundError, noCompletedSessionsError } from './errors.js';
+import { DashboardModel, renderDashboard, type DashboardHandle } from '../tui/index.js';
+import {
+  SpecwatchError,
+  noActiveSessionError,
+  sessionNotFoundError,
+  sessionNameNotFoundError,
+  noCompletedSessionsError,
+} from './errors.js';
 import { loadLlmConfig } from '../llm/config.js';
 import { explainAllInvestigations } from '../llm/client.js';
 import type { ExportOptions, AggregatedSchema, SessionConsumer } from '../types/index.js';
@@ -156,7 +170,7 @@ export function createProgram(): Command {
         if (consumer !== 'human' && consumer !== 'agent') {
           throw new SpecwatchError(
             `Invalid consumer type: '${consumer}'.`,
-            "Use --consumer human or --consumer agent.",
+            'Use --consumer human or --consumer agent.',
           );
         }
         const autoAggregate = opts['autoAggregate'] === true || opts['autoAggregate'] === '';
@@ -192,7 +206,13 @@ export function createProgram(): Command {
           );
         }
 
-        const session = sessions.createSession(targetUrl, port, opts['name'], maxSamples, consumer as SessionConsumer);
+        const session = sessions.createSession(
+          targetUrl,
+          port,
+          opts['name'],
+          maxSamples,
+          consumer as SessionConsumer,
+        );
 
         const _proxy = new ProxyServer({
           targetUrl,
@@ -215,6 +235,12 @@ export function createProgram(): Command {
         let _skippedCount = 0;
         let currentSnapshot = 0;
         let samplesSinceLastSnapshot = 0;
+
+        // Live TUI dashboard: interactive human sessions only. When piped,
+        // quiet, or agent-consumed, fall back to the line printer below.
+        const useTui = shouldUseTui(isInteractive(), consumer, isQuiet());
+        let dashboard: DashboardModel | undefined;
+        let dash: DashboardHandle | undefined;
 
         // Create a new proxy with proper async capture
         const _captureProxy = new ProxyServer({
@@ -275,6 +301,7 @@ export function createProgram(): Command {
             if (pair.requestBodySkipped || pair.responseBodySkipped) {
               sessions.incrementSkippedCount(session.id);
               _skippedCount++;
+              dashboard?.recordSkipped();
               verbose(`Skipped oversized body: ${pair.method} ${pair.url}`);
               return;
             }
@@ -283,16 +310,14 @@ export function createProgram(): Command {
             const jsonrpc = extractJsonRpcFromBody(pair.requestBody);
 
             // Infer schemas
-            const requestSchema = pair.requestBody !== undefined
-              ? inferSchema(pair.requestBody)
-              : undefined;
+            const requestSchema =
+              pair.requestBody !== undefined ? inferSchema(pair.requestBody) : undefined;
             // Unwrap MCP tool responses to infer schema from actual content
             const responseBody = jsonrpc?.method?.startsWith('tools/')
               ? unwrapMcpResponse(pair.responseBody)
               : pair.responseBody;
-            const responseSchema = responseBody !== undefined
-              ? inferSchema(responseBody)
-              : undefined;
+            const responseSchema =
+              responseBody !== undefined ? inferSchema(responseBody) : undefined;
 
             // Normalize path
             const normalizedPath = normalizePath(pair.url);
@@ -321,31 +346,36 @@ export function createProgram(): Command {
             sampleCount++;
             samplesSinceLastSnapshot++;
 
-            verbose(
-              `[${sampleCount}] ${pair.method} ${pair.url} → ${pair.statusCode}`,
-            );
+            dashboard?.recordSample(pair.method, normalizedPath, pair.statusCode);
+            verbose(`[${sampleCount}] ${pair.method} ${pair.url} → ${pair.statusCode}`);
 
             // Check max samples threshold
             if (maxSamples !== undefined && samplesSinceLastSnapshot >= maxSamples) {
               if (autoAggregate) {
                 // Auto-aggregate: create a new cumulative snapshot and keep going
                 currentSnapshot++;
-                info(`\nAuto-aggregating snapshot ${currentSnapshot} (${sampleCount} total samples)...`);
+                if (!useTui)
+                  info(
+                    `\nAuto-aggregating snapshot ${currentSnapshot} (${sampleCount} total samples)...`,
+                  );
                 try {
                   const result = runAggregation(db, session.id, {
                     snapshot: currentSnapshot,
                     skipStateTransition: true,
                   });
-                  success(`Snapshot ${currentSnapshot}: ${result.schemas.length} endpoints from ${result.sampleCount} samples`);
+                  const msg = `Snapshot ${currentSnapshot}: ${result.schemas.length} endpoints from ${result.sampleCount} samples`;
+                  if (useTui) dashboard?.recordSnapshot(currentSnapshot, msg);
+                  else success(msg);
                 } catch (aggErr) {
-                  logError(
-                    `Auto-aggregation failed: ${aggErr instanceof Error ? aggErr.message : String(aggErr)}`,
-                  );
+                  const emsg = `Auto-aggregation failed: ${aggErr instanceof Error ? aggErr.message : String(aggErr)}`;
+                  if (useTui) dashboard?.setMessage(emsg);
+                  else logError(emsg);
                 }
                 samplesSinceLastSnapshot = 0;
               } else {
                 // No auto-aggregate: stop capturing
-                info(`\nReached max samples (${maxSamples}). Stopping...`);
+                if (useTui) dashboard?.setMessage(`Reached max samples (${maxSamples}). Stopping…`);
+                else info(`\nReached max samples (${maxSamples}). Stopping...`);
                 server.close();
               }
             }
@@ -380,27 +410,51 @@ export function createProgram(): Command {
           server.listen(port, '127.0.0.1', () => resolve());
           server.once('error', (err) => {
             if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-              reject(new SpecwatchError(
-                `Port ${port} is already in use.`,
-                `Try: specwatch start ${targetUrl} --port ${port + 1}`,
-              ));
+              reject(
+                new SpecwatchError(
+                  `Port ${port} is already in use.`,
+                  `Try: specwatch start ${targetUrl} --port ${port + 1}`,
+                ),
+              );
             } else {
               reject(err);
             }
           });
         });
 
-        info(`Specwatch proxy started`);
-        info(`  Session: ${session.id.slice(0, 8)}`);
-        if (session.name) info(`  Name:    ${session.name}`);
-        info(`  Target:  ${targetUrl}`);
-        info(`  Proxy:   http://localhost:${port}`);
-        if (maxSamples) info(`  Max:     ${maxSamples} samples`);
-        if (autoAggregate) info(`  Mode:    auto-aggregate every ${maxSamples} samples`);
-        info(`\nPress Ctrl+C to stop and aggregate.`);
+        const proxyUrl = `http://localhost:${port}`;
+        if (useTui) {
+          dashboard = new DashboardModel({
+            target: targetUrl,
+            proxyUrl,
+            sessionId: session.id,
+            sessionName: session.name ?? undefined,
+            maxSamples,
+            autoAggregate,
+            startedAt: Date.now(),
+          });
+          dash = renderDashboard(dashboard, {
+            // Route quit through the existing SIGINT handler so aggregation
+            // and double-Ctrl+C force-quit semantics stay in one place.
+            onQuit: () => process.kill(process.pid, 'SIGINT'),
+          });
+        } else {
+          info(`Specwatch proxy started`);
+          info(`  Session: ${session.id.slice(0, 8)}`);
+          if (session.name) info(`  Name:    ${session.name}`);
+          info(`  Target:  ${targetUrl}`);
+          info(`  Proxy:   ${proxyUrl}`);
+          if (maxSamples) info(`  Max:     ${maxSamples} samples`);
+          if (autoAggregate) info(`  Mode:    auto-aggregate every ${maxSamples} samples`);
+          info(`\nPress Ctrl+C to stop and aggregate.`);
+        }
 
         // Register shutdown handlers
         const _cleanup = registerShutdownHandlers(async (forceQuit) => {
+          // Tear down the TUI before printing so aggregation output isn't
+          // clobbered by Ink's live render.
+          dash?.unmount();
+
           if (forceQuit) {
             warn('\nForce quit — skipping aggregation.');
             server.close();
@@ -434,9 +488,15 @@ export function createProgram(): Command {
               // Now transition to completed
               sessions.updateSessionStatus(session.id, 'aggregating');
               sessions.updateSessionStatus(session.id, 'completed');
-              success(`Final snapshot ${currentSnapshot}: ${result.schemas.length} endpoints from ${result.sampleCount} samples`);
-              info(`\nExport with: specwatch export --name "${session.name ?? session.id.slice(0, 8)}"`);
-              info(`Diff snapshots: specwatch diff --name "${session.name ?? session.id.slice(0, 8)}" --snapshots 1 ${currentSnapshot}`);
+              success(
+                `Final snapshot ${currentSnapshot}: ${result.schemas.length} endpoints from ${result.sampleCount} samples`,
+              );
+              info(
+                `\nExport with: specwatch export --name "${session.name ?? session.id.slice(0, 8)}"`,
+              );
+              info(
+                `Diff snapshots: specwatch diff --name "${session.name ?? session.id.slice(0, 8)}" --snapshots 1 ${currentSnapshot}`,
+              );
             } else {
               const result = runAggregation(db, session.id);
               success(`Done! ${formatAggregationSummary(result.schemas, result.sampleCount)}`);
@@ -543,105 +603,116 @@ export function createProgram(): Command {
     .option('--include-metadata', 'Include x-specwatch-* extensions')
     .option('--name <name>', 'Session name (alternative to session ID)')
     .option('--snapshot <n>', 'Snapshot number (defaults to latest)')
-    .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
-      try {
-        const db = getDatabase();
-        const sessions = new SessionRepository(db);
-        const schemaRepo = new AggregatedSchemaRepository(db);
+    .action(
+      async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
+        try {
+          const db = getDatabase();
+          const sessions = new SessionRepository(db);
+          const schemaRepo = new AggregatedSchemaRepository(db);
 
-        // Resolve session
-        const targetId = resolveSessionId(sessions, sessionId, opts['name'] as string | undefined, 'latest');
+          // Resolve session
+          const targetId = resolveSessionId(
+            sessions,
+            sessionId,
+            opts['name'] as string | undefined,
+            'latest',
+          );
 
-        const snapshotOpt = opts['snapshot'] as string | undefined;
-        const schemas = snapshotOpt !== undefined
-          ? schemaRepo.listBySessionSnapshot(targetId, parseInt(snapshotOpt, 10))
-          : schemaRepo.listBySessionLatestSnapshot(targetId);
-        if (schemas.length === 0) {
-          throw new SpecwatchError(
+          const snapshotOpt = opts['snapshot'] as string | undefined;
+          const schemas =
             snapshotOpt !== undefined
-              ? `No schemas found for snapshot ${snapshotOpt}.`
-              : 'No schemas found for this session.',
-            'Run aggregation first: specwatch aggregate',
-          );
-        }
-
-        // Apply confidence filter
-        const minConfidence = parseFloat(opts['minConfidence'] as string ?? '0');
-        const filtered = schemas.filter((s) => s.confidenceScore >= minConfidence);
-
-        if (filtered.length === 0) {
-          throw new SpecwatchError(
-            `No schemas meet the minimum confidence threshold of ${minConfidence}.`,
-            'Try lowering --min-confidence or capturing more traffic.',
-          );
-        }
-
-        const format = opts['format'] as string;
-        let output: string;
-
-        if (format === 'json') {
-          const exported = buildJsonExport(filtered);
-          output = serializeJson(exported);
-        } else {
-          // Look up the session — needed both for agent extensions and to seed
-          // the OpenAPI servers block from the proxied target URL.
-          const session = sessions.getSession(targetId);
-
-          const exportOptions: Partial<ExportOptions> = {
-            title: opts['title'] as string | undefined,
-            version: opts['version'] as string | undefined,
-            includeMetadata: opts['includeMetadata'] === true,
-            servers: session?.targetUrl ? [session.targetUrl] : undefined,
-          };
-
-          // Build agent extensions for agent sessions
-          let agentExtensionsMap: Record<string, AgentExtension> | undefined;
-          if (session?.consumer === 'agent') {
-            const sequenceAnalysis = detectSequences(db, targetId);
-            const sampleRepo = new SampleRepository(db);
-            const samples = sampleRepo.listBySession(targetId);
-            const jsonRpc = isJsonRpcSession(samples);
-            const completenessReport = jsonRpc
-              ? analyzeJsonRpcCompleteness(samples)
-              : analyzeCompleteness(filtered);
-            agentExtensionsMap = buildAgentExtensions(
-              sequenceAnalysis,
-              completenessReport,
-              jsonRpc,
+              ? schemaRepo.listBySessionSnapshot(targetId, parseInt(snapshotOpt, 10))
+              : schemaRepo.listBySessionLatestSnapshot(targetId);
+          if (schemas.length === 0) {
+            throw new SpecwatchError(
+              snapshotOpt !== undefined
+                ? `No schemas found for snapshot ${snapshotOpt}.`
+                : 'No schemas found for this session.',
+              'Run aggregation first: specwatch aggregate',
             );
-            if (Object.keys(agentExtensionsMap).length === 0) {
-              agentExtensionsMap = undefined;
+          }
+
+          // Apply confidence filter
+          const minConfidence = parseFloat((opts['minConfidence'] as string) ?? '0');
+          const filtered = schemas.filter((s) => s.confidenceScore >= minConfidence);
+
+          if (filtered.length === 0) {
+            throw new SpecwatchError(
+              `No schemas meet the minimum confidence threshold of ${minConfidence}.`,
+              'Try lowering --min-confidence or capturing more traffic.',
+            );
+          }
+
+          const format = opts['format'] as string;
+          let output: string;
+
+          if (format === 'json') {
+            const exported = buildJsonExport(filtered);
+            output = serializeJson(exported);
+          } else {
+            // Look up the session — needed both for agent extensions and to seed
+            // the OpenAPI servers block from the proxied target URL.
+            const session = sessions.getSession(targetId);
+
+            const exportOptions: Partial<ExportOptions> = {
+              title: opts['title'] as string | undefined,
+              version: opts['version'] as string | undefined,
+              includeMetadata: opts['includeMetadata'] === true,
+              servers: session?.targetUrl ? [session.targetUrl] : undefined,
+            };
+
+            // Build agent extensions for agent sessions
+            let agentExtensionsMap: Record<string, AgentExtension> | undefined;
+            if (session?.consumer === 'agent') {
+              const sequenceAnalysis = detectSequences(db, targetId);
+              const sampleRepo = new SampleRepository(db);
+              const samples = sampleRepo.listBySession(targetId);
+              const jsonRpc = isJsonRpcSession(samples);
+              const completenessReport = jsonRpc
+                ? analyzeJsonRpcCompleteness(samples)
+                : analyzeCompleteness(filtered);
+              agentExtensionsMap = buildAgentExtensions(
+                sequenceAnalysis,
+                completenessReport,
+                jsonRpc,
+              );
+              if (Object.keys(agentExtensionsMap).length === 0) {
+                agentExtensionsMap = undefined;
+              }
             }
+
+            const domainModels = discoverDomainModels(filtered);
+            let doc = buildOpenApiDocument(
+              filtered,
+              exportOptions,
+              agentExtensionsMap,
+              domainModels,
+            );
+            const openapiVersion = opts['openapiVersion'] as string | undefined;
+            if (openapiVersion === '3.0') {
+              doc = convertToOpenApi30(doc);
+            }
+            const serializationFormat = opts['json'] ? ('json' as const) : ('yaml' as const);
+            output = serializeOpenApi(doc, serializationFormat);
           }
 
-          const domainModels = discoverDomainModels(filtered);
-          let doc = buildOpenApiDocument(filtered, exportOptions, agentExtensionsMap, domainModels);
-          const openapiVersion = opts['openapiVersion'] as string | undefined;
-          if (openapiVersion === '3.0') {
-            doc = convertToOpenApi30(doc);
+          // Output
+          const outputFile = opts['output'] as string | undefined;
+          if (outputFile) {
+            const { writeFileSync } = await import('node:fs');
+            writeFileSync(outputFile, output + '\n', 'utf8');
+            success(`Exported ${filtered.length} endpoints to ${outputFile}`);
+          } else {
+            process.stdout.write(output + '\n');
           }
-          const serializationFormat = opts['json'] ? 'json' as const : 'yaml' as const;
-          output = serializeOpenApi(doc, serializationFormat);
+        } catch (err) {
+          handleError(err);
         }
-
-        // Output
-        const outputFile = opts['output'] as string | undefined;
-        if (outputFile) {
-          const { writeFileSync } = await import('node:fs');
-          writeFileSync(outputFile, output + '\n', 'utf8');
-          success(`Exported ${filtered.length} endpoints to ${outputFile}`);
-        } else {
-          process.stdout.write(output + '\n');
-        }
-      } catch (err) {
-        handleError(err);
-      }
-    });
+      },
+    );
 
   // ========== sessions ==========
-  const sessionsCmd = program
-    .command('sessions')
-    .description('Manage sessions');
+  const sessionsCmd = program.command('sessions').description('Manage sessions');
 
   sessionsCmd
     .command('list')
@@ -705,127 +776,133 @@ export function createProgram(): Command {
     .option('--name2 <name>', 'Second session name (alternative to session2 ID)')
     .option('--name <name>', 'Session name (for comparing snapshots within a session)')
     .option('--snapshots <numbers...>', 'Compare two snapshots within the same session')
-    .action((session1: string | undefined, session2: string | undefined, opts: Record<string, string | undefined>) => {
-      try {
-        const db = getDatabase();
-        const sessions = new SessionRepository(db);
-        const schemaRepo = new AggregatedSchemaRepository(db);
+    .action(
+      (
+        session1: string | undefined,
+        session2: string | undefined,
+        opts: Record<string, string | undefined>,
+      ) => {
+        try {
+          const db = getDatabase();
+          const sessions = new SessionRepository(db);
+          const schemaRepo = new AggregatedSchemaRepository(db);
 
-        let schemas1: AggregatedSchema[];
-        let schemas2: AggregatedSchema[];
+          let schemas1: AggregatedSchema[];
+          let schemas2: AggregatedSchema[];
 
-        const snapshotsOpt = opts['snapshots'] as string[] | undefined;
-        if (snapshotsOpt !== undefined) {
-          // Snapshot comparison within a single session
-          const sessionName = opts['name'] as string | undefined;
-          const targetId = resolveSessionId(sessions, session1, sessionName, 'latest');
+          const snapshotsOpt = opts['snapshots'] as string[] | undefined;
+          if (snapshotsOpt !== undefined) {
+            // Snapshot comparison within a single session
+            const sessionName = opts['name'] as string | undefined;
+            const targetId = resolveSessionId(sessions, session1, sessionName, 'latest');
 
-          // Parse snapshot numbers from variadic option: --snapshots 1 2
-          if (snapshotsOpt.length !== 2) {
-            throw new SpecwatchError(
-              'Exactly two snapshot numbers are required.',
-              'Example: specwatch diff --name bank-demo --snapshots 1 2',
-            );
-          }
-          const snap1 = parseInt(snapshotsOpt[0], 10);
-          const snap2 = parseInt(snapshotsOpt[1], 10);
-          if (isNaN(snap1) || isNaN(snap2)) {
-            throw new SpecwatchError(
-              'Two snapshot numbers are required.',
-              'Example: specwatch diff --name bank-demo --snapshots 1 2',
-            );
-          }
+            // Parse snapshot numbers from variadic option: --snapshots 1 2
+            if (snapshotsOpt.length !== 2) {
+              throw new SpecwatchError(
+                'Exactly two snapshot numbers are required.',
+                'Example: specwatch diff --name bank-demo --snapshots 1 2',
+              );
+            }
+            const snap1 = parseInt(snapshotsOpt[0], 10);
+            const snap2 = parseInt(snapshotsOpt[1], 10);
+            if (isNaN(snap1) || isNaN(snap2)) {
+              throw new SpecwatchError(
+                'Two snapshot numbers are required.',
+                'Example: specwatch diff --name bank-demo --snapshots 1 2',
+              );
+            }
 
-          schemas1 = schemaRepo.listBySessionSnapshot(targetId, snap1);
-          schemas2 = schemaRepo.listBySessionSnapshot(targetId, snap2);
+            schemas1 = schemaRepo.listBySessionSnapshot(targetId, snap1);
+            schemas2 = schemaRepo.listBySessionSnapshot(targetId, snap2);
 
-          if (schemas1.length === 0) {
-            throw new SpecwatchError(
-              `No schemas found for snapshot ${snap1}.`,
-              `Available snapshots: 1 to ${schemaRepo.getMaxSnapshotForSession(targetId)}`,
-            );
-          }
-          if (schemas2.length === 0) {
-            throw new SpecwatchError(
-              `No schemas found for snapshot ${snap2}.`,
-              `Available snapshots: 1 to ${schemaRepo.getMaxSnapshotForSession(targetId)}`,
-            );
-          }
-        } else {
-          // Cross-session comparison (original behavior)
-          const id1 = resolveSessionId(sessions, session1, opts['name1'], 'none');
-          const id2 = resolveSessionId(sessions, session2, opts['name2'], 'none');
+            if (schemas1.length === 0) {
+              throw new SpecwatchError(
+                `No schemas found for snapshot ${snap1}.`,
+                `Available snapshots: 1 to ${schemaRepo.getMaxSnapshotForSession(targetId)}`,
+              );
+            }
+            if (schemas2.length === 0) {
+              throw new SpecwatchError(
+                `No schemas found for snapshot ${snap2}.`,
+                `Available snapshots: 1 to ${schemaRepo.getMaxSnapshotForSession(targetId)}`,
+              );
+            }
+          } else {
+            // Cross-session comparison (original behavior)
+            const id1 = resolveSessionId(sessions, session1, opts['name1'], 'none');
+            const id2 = resolveSessionId(sessions, session2, opts['name2'], 'none');
 
-          schemas1 = schemaRepo.listBySessionLatestSnapshot(id1);
-          schemas2 = schemaRepo.listBySessionLatestSnapshot(id2);
+            schemas1 = schemaRepo.listBySessionLatestSnapshot(id1);
+            schemas2 = schemaRepo.listBySessionLatestSnapshot(id2);
 
-          if (schemas1.length === 0) {
-            throw new SpecwatchError(
-              `No schemas found for session '${id1.slice(0, 8)}'.`,
-              'Run aggregation first: specwatch aggregate ' + id1,
-            );
-          }
-          if (schemas2.length === 0) {
-            throw new SpecwatchError(
-              `No schemas found for session '${id2.slice(0, 8)}'.`,
-              'Run aggregation first: specwatch aggregate ' + id2,
-            );
-          }
-        }
-
-        // Build map from endpoint key to schema
-        const map1 = new Map<string, AggregatedSchema>();
-        for (const s of schemas1) {
-          map1.set(`${s.httpMethod} ${s.path}`, s);
-        }
-        const map2 = new Map<string, AggregatedSchema>();
-        for (const s of schemas2) {
-          map2.set(`${s.httpMethod} ${s.path}`, s);
-        }
-
-        // Find all unique endpoints
-        const allEndpoints = new Set([...map1.keys(), ...map2.keys()]);
-        let hasChanges = false;
-
-        for (const endpoint of [...allEndpoints].sort()) {
-          const old = map1.get(endpoint);
-          const newer = map2.get(endpoint);
-
-          if (!old) {
-            info(`\n${endpoint}: NEW endpoint`);
-            hasChanges = true;
-            continue;
-          }
-          if (!newer) {
-            warn(`\n${endpoint}: REMOVED endpoint`);
-            hasChanges = true;
-            continue;
-          }
-
-          // Compare response schemas (primary response)
-          const oldResponse = old.responseSchemas
-            ? Object.values(old.responseSchemas)[0]
-            : undefined;
-          const newResponse = newer.responseSchemas
-            ? Object.values(newer.responseSchemas)[0]
-            : undefined;
-
-          if (oldResponse && newResponse) {
-            const diff = detectBreakingChanges(oldResponse, newResponse);
-            if (diff.breakingChanges.length > 0 || diff.nonBreakingChanges.length > 0) {
-              hasChanges = true;
-              process.stdout.write(formatDiff(diff, endpoint) + '\n');
+            if (schemas1.length === 0) {
+              throw new SpecwatchError(
+                `No schemas found for session '${id1.slice(0, 8)}'.`,
+                'Run aggregation first: specwatch aggregate ' + id1,
+              );
+            }
+            if (schemas2.length === 0) {
+              throw new SpecwatchError(
+                `No schemas found for session '${id2.slice(0, 8)}'.`,
+                'Run aggregation first: specwatch aggregate ' + id2,
+              );
             }
           }
-        }
 
-        if (!hasChanges) {
-          info('No differences found between the two sessions.');
+          // Build map from endpoint key to schema
+          const map1 = new Map<string, AggregatedSchema>();
+          for (const s of schemas1) {
+            map1.set(`${s.httpMethod} ${s.path}`, s);
+          }
+          const map2 = new Map<string, AggregatedSchema>();
+          for (const s of schemas2) {
+            map2.set(`${s.httpMethod} ${s.path}`, s);
+          }
+
+          // Find all unique endpoints
+          const allEndpoints = new Set([...map1.keys(), ...map2.keys()]);
+          let hasChanges = false;
+
+          for (const endpoint of [...allEndpoints].sort()) {
+            const old = map1.get(endpoint);
+            const newer = map2.get(endpoint);
+
+            if (!old) {
+              info(`\n${endpoint}: NEW endpoint`);
+              hasChanges = true;
+              continue;
+            }
+            if (!newer) {
+              warn(`\n${endpoint}: REMOVED endpoint`);
+              hasChanges = true;
+              continue;
+            }
+
+            // Compare response schemas (primary response)
+            const oldResponse = old.responseSchemas
+              ? Object.values(old.responseSchemas)[0]
+              : undefined;
+            const newResponse = newer.responseSchemas
+              ? Object.values(newer.responseSchemas)[0]
+              : undefined;
+
+            if (oldResponse && newResponse) {
+              const diff = detectBreakingChanges(oldResponse, newResponse);
+              if (diff.breakingChanges.length > 0 || diff.nonBreakingChanges.length > 0) {
+                hasChanges = true;
+                process.stdout.write(formatDiff(diff, endpoint) + '\n');
+              }
+            }
+          }
+
+          if (!hasChanges) {
+            info('No differences found between the two sessions.');
+          }
+        } catch (err) {
+          handleError(err);
         }
-      } catch (err) {
-        handleError(err);
-      }
-    });
+      },
+    );
 
   // ========== agent-report ==========
   program
@@ -836,108 +913,117 @@ export function createProgram(): Command {
     .option('--explain', 'Use LLM for richer explanations')
     .option('--spec <file>', 'OpenAPI spec to map observed operations against')
     .option('-o, --output <file>', 'Write machine-readable agent evidence JSON')
-    .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
-      try {
-        const db = getDatabase();
-        const sessions = new SessionRepository(db);
-        const schemaRepo = new AggregatedSchemaRepository(db);
+    .action(
+      async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
+        try {
+          const db = getDatabase();
+          const sessions = new SessionRepository(db);
+          const schemaRepo = new AggregatedSchemaRepository(db);
 
-        // Resolve session (same pattern as export command)
-        const targetId = resolveSessionId(sessions, sessionId, opts['name'] as string | undefined, 'latest');
-        const session = sessions.getSession(targetId)!;
-
-        // Validate consumer type
-        if (session.consumer !== 'agent') {
-          throw new SpecwatchError(
-            'agent-report requires a session captured with --consumer agent',
-            'Start a session with: specwatch start <url> --consumer agent',
+          // Resolve session (same pattern as export command)
+          const targetId = resolveSessionId(
+            sessions,
+            sessionId,
+            opts['name'] as string | undefined,
+            'latest',
           );
-        }
+          const session = sessions.getSession(targetId)!;
 
-        // Get aggregated schemas
-        const schemas = schemaRepo.listBySessionLatestSnapshot(targetId);
-        if (schemas.length === 0) {
-          throw new SpecwatchError(
-            'No schemas found for this session.',
-            'Run aggregation first: specwatch aggregate',
-          );
-        }
-
-        // Run analysis — use JSON-RPC completeness for MCP-style sessions
-        const sequenceAnalysis = detectSequences(db, targetId);
-        const sampleRepo = new SampleRepository(db);
-        const samples = sampleRepo.listBySession(targetId);
-        const jsonRpc = isJsonRpcSession(samples);
-        const completenessReport = jsonRpc
-          ? analyzeJsonRpcCompleteness(samples)
-          : analyzeCompleteness(schemas);
-
-        // Detect phases from sample timing
-        const phaseAnalysis = detectPhases(samples);
-
-        // Investigate redundant calls
-        let investigationReport = investigateRedundantCalls(
-          samples,
-          sequenceAnalysis.redundantCalls,
-          phaseAnalysis,
-        );
-
-        // LLM-enhanced explanations
-        if (opts['explain']) {
-          const llmConfig = loadLlmConfig();
-          if (!llmConfig) {
-            warn('LLM not configured — set LLM_BASE_URL and LLM_API_KEY (or add a .env file). Continuing with heuristic explanations.');
-          } else {
-            investigationReport = await explainAllInvestigations(investigationReport, llmConfig);
-          }
-        }
-
-        // Format and output
-        const sessionName = session.name ?? session.id.slice(0, 8);
-        const reportOutput = formatAgentReport(
-          sessionName,
-          sequenceAnalysis,
-          completenessReport,
-          session.sampleCount,
-          phaseAnalysis,
-          investigationReport,
-          samples,
-        );
-
-        const evidenceFile = opts['output'] as string | undefined;
-        if (evidenceFile) {
-          const specPath = opts['spec'] as string | undefined;
-          // Read the spec once; reuse the same bytes for parsing and hashing.
-          const { readFileSync, writeFileSync } = await import('node:fs');
-          const specContent = specPath ? readFileSync(specPath, 'utf8') : undefined;
-          const specOperations =
-            specContent !== undefined
-              ? collectOpenApiOperations(parseOpenApiSpec(specContent, specPath))
-              : undefined;
-          const evidence = buildAgentEvidence({
-            runName: sessionName,
-            sampleCount: session.sampleCount,
-            sequenceAnalysis,
-            completenessReport,
-            specSource: specPath,
-            specContent,
-            specOperations,
-            isJsonRpc: jsonRpc,
-          });
-          writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
-          success(`Wrote agent evidence to ${evidenceFile}`);
-          if (jsonRpc) {
-            warn(
-              'JSON-RPC session: operation-level evidence is REST-only in schema v1 — the evidence file carries a run-level warning. Use the terminal report for JSON-RPC findings.',
+          // Validate consumer type
+          if (session.consumer !== 'agent') {
+            throw new SpecwatchError(
+              'agent-report requires a session captured with --consumer agent',
+              'Start a session with: specwatch start <url> --consumer agent',
             );
           }
-        }
 
-        process.stdout.write(reportOutput + '\n');
-      } catch (err) {
-        handleError(err);
-      }
-    });
+          // Get aggregated schemas
+          const schemas = schemaRepo.listBySessionLatestSnapshot(targetId);
+          if (schemas.length === 0) {
+            throw new SpecwatchError(
+              'No schemas found for this session.',
+              'Run aggregation first: specwatch aggregate',
+            );
+          }
+
+          // Run analysis — use JSON-RPC completeness for MCP-style sessions
+          const sequenceAnalysis = detectSequences(db, targetId);
+          const sampleRepo = new SampleRepository(db);
+          const samples = sampleRepo.listBySession(targetId);
+          const jsonRpc = isJsonRpcSession(samples);
+          const completenessReport = jsonRpc
+            ? analyzeJsonRpcCompleteness(samples)
+            : analyzeCompleteness(schemas);
+
+          // Detect phases from sample timing
+          const phaseAnalysis = detectPhases(samples);
+
+          // Investigate redundant calls
+          let investigationReport = investigateRedundantCalls(
+            samples,
+            sequenceAnalysis.redundantCalls,
+            phaseAnalysis,
+          );
+
+          // LLM-enhanced explanations
+          if (opts['explain']) {
+            const llmConfig = loadLlmConfig();
+            if (!llmConfig) {
+              warn(
+                'LLM not configured — set LLM_BASE_URL and LLM_API_KEY (or add a .env file). Continuing with heuristic explanations.',
+              );
+            } else {
+              investigationReport = await explainAllInvestigations(investigationReport, llmConfig);
+            }
+          }
+
+          // Format and output
+          const sessionName = session.name ?? session.id.slice(0, 8);
+          const reportOutput = formatAgentReport(
+            sessionName,
+            sequenceAnalysis,
+            completenessReport,
+            session.sampleCount,
+            phaseAnalysis,
+            investigationReport,
+            samples,
+          );
+
+          const evidenceFile = opts['output'] as string | undefined;
+          if (evidenceFile) {
+            const specPath = opts['spec'] as string | undefined;
+            // Read the spec once; reuse the same bytes for parsing and hashing.
+            const { readFileSync, writeFileSync } = await import('node:fs');
+            const specContent = specPath ? readFileSync(specPath, 'utf8') : undefined;
+            const specOperations =
+              specContent !== undefined
+                ? collectOpenApiOperations(parseOpenApiSpec(specContent, specPath))
+                : undefined;
+            const evidence = buildAgentEvidence({
+              runName: sessionName,
+              sampleCount: session.sampleCount,
+              sequenceAnalysis,
+              completenessReport,
+              specSource: specPath,
+              specContent,
+              specOperations,
+              isJsonRpc: jsonRpc,
+            });
+            writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+            success(`Wrote agent evidence to ${evidenceFile}`);
+            if (jsonRpc) {
+              warn(
+                'JSON-RPC session: operation-level evidence is REST-only in schema v1 — the evidence file carries a run-level warning. Use the terminal report for JSON-RPC findings.',
+              );
+            }
+          }
+
+          process.stdout.write(reportOutput + '\n');
+        } catch (err) {
+          handleError(err);
+        }
+      },
+    );
 
   // ========== investigate ==========
   program
@@ -947,88 +1033,101 @@ export function createProgram(): Command {
     .option('--tool <name>', 'Investigate a specific tool/operation')
     .option('--name <name>', 'Session name')
     .option('--explain', 'Use LLM for richer explanations')
-    .action(async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
-      try {
-        const db = getDatabase();
-        const sessions = new SessionRepository(db);
+    .action(
+      async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
+        try {
+          const db = getDatabase();
+          const sessions = new SessionRepository(db);
 
-        // Resolve session (same pattern as export command)
-        const targetId = resolveSessionId(sessions, sessionId, opts['name'] as string | undefined, 'latest');
-        const session = sessions.getSession(targetId)!;
-
-        // Validate consumer type
-        if (session.consumer !== 'agent') {
-          throw new SpecwatchError(
-            'investigate requires a session captured with --consumer agent',
-            'Start a session with: specwatch start <url> --consumer agent',
+          // Resolve session (same pattern as export command)
+          const targetId = resolveSessionId(
+            sessions,
+            sessionId,
+            opts['name'] as string | undefined,
+            'latest',
           );
-        }
+          const session = sessions.getSession(targetId)!;
 
-        // Load samples
-        const sampleRepo = new SampleRepository(db);
-        const samples = sampleRepo.listBySession(targetId);
-        if (samples.length === 0) {
-          throw new SpecwatchError(
-            'No samples found for this session.',
-            'Capture some traffic first.',
-          );
-        }
-
-        // Run analysis
-        const sequenceAnalysis = detectSequences(db, targetId);
-        const phaseAnalysis = detectPhases(samples);
-
-        // Load LLM config if --explain
-        let llmConfig: ReturnType<typeof loadLlmConfig> = undefined;
-        if (opts['explain']) {
-          llmConfig = loadLlmConfig();
-          if (!llmConfig) {
-            warn('LLM not configured — set LLM_BASE_URL and LLM_API_KEY (or add a .env file). Continuing with heuristic explanations.');
-          }
-        }
-
-        if (opts['tool']) {
-          // Investigate a specific tool/operation
-          let investigation = investigateOperation(samples, opts['tool'] as string, phaseAnalysis);
-          if (investigation.occurrences.length === 0) {
+          // Validate consumer type
+          if (session.consumer !== 'agent') {
             throw new SpecwatchError(
-              `No calls found for operation "${opts['tool']}"`,
-              'Check the operation key with: specwatch agent-report',
+              'investigate requires a session captured with --consumer agent',
+              'Start a session with: specwatch start <url> --consumer agent',
             );
           }
-          if (llmConfig) {
-            const enhanced = await explainAllInvestigations(
-              { sessionId: session.id, investigations: [investigation] },
-              llmConfig,
+
+          // Load samples
+          const sampleRepo = new SampleRepository(db);
+          const samples = sampleRepo.listBySession(targetId);
+          if (samples.length === 0) {
+            throw new SpecwatchError(
+              'No samples found for this session.',
+              'Capture some traffic first.',
             );
-            investigation = enhanced.investigations[0];
-          }
-          process.stdout.write(formatInvestigation(investigation) + '\n');
-        } else {
-          // Investigate all redundant calls
-          if (sequenceAnalysis.redundantCalls.length === 0) {
-            info('No redundant calls detected in this session.');
-            return;
           }
 
-          let report = investigateRedundantCalls(
-            samples,
-            sequenceAnalysis.redundantCalls,
-            phaseAnalysis,
-          );
+          // Run analysis
+          const sequenceAnalysis = detectSequences(db, targetId);
+          const phaseAnalysis = detectPhases(samples);
 
-          if (llmConfig) {
-            report = await explainAllInvestigations(report, llmConfig);
+          // Load LLM config if --explain
+          let llmConfig: ReturnType<typeof loadLlmConfig> = undefined;
+          if (opts['explain']) {
+            llmConfig = loadLlmConfig();
+            if (!llmConfig) {
+              warn(
+                'LLM not configured — set LLM_BASE_URL and LLM_API_KEY (or add a .env file). Continuing with heuristic explanations.',
+              );
+            }
           }
 
-          for (const investigation of report.investigations) {
-            process.stdout.write(formatInvestigation(investigation) + '\n\n');
+          if (opts['tool']) {
+            // Investigate a specific tool/operation
+            let investigation = investigateOperation(
+              samples,
+              opts['tool'] as string,
+              phaseAnalysis,
+            );
+            if (investigation.occurrences.length === 0) {
+              throw new SpecwatchError(
+                `No calls found for operation "${opts['tool']}"`,
+                'Check the operation key with: specwatch agent-report',
+              );
+            }
+            if (llmConfig) {
+              const enhanced = await explainAllInvestigations(
+                { sessionId: session.id, investigations: [investigation] },
+                llmConfig,
+              );
+              investigation = enhanced.investigations[0];
+            }
+            process.stdout.write(formatInvestigation(investigation) + '\n');
+          } else {
+            // Investigate all redundant calls
+            if (sequenceAnalysis.redundantCalls.length === 0) {
+              info('No redundant calls detected in this session.');
+              return;
+            }
+
+            let report = investigateRedundantCalls(
+              samples,
+              sequenceAnalysis.redundantCalls,
+              phaseAnalysis,
+            );
+
+            if (llmConfig) {
+              report = await explainAllInvestigations(report, llmConfig);
+            }
+
+            for (const investigation of report.investigations) {
+              process.stdout.write(formatInvestigation(investigation) + '\n\n');
+            }
           }
+        } catch (err) {
+          handleError(err);
         }
-      } catch (err) {
-        handleError(err);
-      }
-    });
+      },
+    );
 
   return program;
 }

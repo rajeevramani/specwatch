@@ -30,6 +30,10 @@ import { buildJsonExport, serializeJson } from '../export/json.js';
 import { detectSequences } from '../analysis/sequences.js';
 import { detectPhases } from '../analysis/phases.js';
 import { investigateRedundantCalls, investigateOperation } from '../analysis/investigation.js';
+import {
+  serializeInvestigationReport,
+  serializeSingleInvestigation,
+} from '../analysis/investigation-json.js';
 import { analyzeCompleteness, analyzeJsonRpcCompleteness } from '../analysis/completeness.js';
 import { buildAgentExtensions } from '../analysis/agent-extensions.js';
 import { buildAgentEvidence } from '../analysis/agent-evidence.js';
@@ -1070,6 +1074,10 @@ export function createProgram(): Command {
     .argument('[session-id]', 'Session ID (defaults to latest completed)')
     .option('--tool <name>', 'Investigate a specific tool/operation')
     .option('--name <name>', 'Session name')
+    .option(
+      '--json',
+      'Emit the investigation as pinned snake_case JSON (schema specwatch.investigation.v1)',
+    )
     .option('--explain', 'Use LLM for richer explanations')
     .action(
       async (sessionId: string | undefined, opts: Record<string, string | boolean | undefined>) => {
@@ -1139,11 +1147,30 @@ export function createProgram(): Command {
               );
               investigation = enhanced.investigations[0];
             }
-            process.stdout.write(formatInvestigation(investigation) + '\n');
+            if (opts['json']) {
+              process.stdout.write(
+                JSON.stringify(serializeSingleInvestigation(session.id, investigation), null, 2) +
+                  '\n',
+              );
+            } else {
+              process.stdout.write(formatInvestigation(investigation) + '\n');
+            }
           } else {
             // Investigate all redundant calls
             if (sequenceAnalysis.redundantCalls.length === 0) {
-              info('No redundant calls detected in this session.');
+              if (opts['json']) {
+                // Emit a valid (empty) report so `jq` still parses; the human
+                // path prints an informational line to stderr instead.
+                process.stdout.write(
+                  JSON.stringify(
+                    serializeInvestigationReport({ sessionId: session.id, investigations: [] }),
+                    null,
+                    2,
+                  ) + '\n',
+                );
+              } else {
+                info('No redundant calls detected in this session.');
+              }
               return;
             }
 
@@ -1157,8 +1184,14 @@ export function createProgram(): Command {
               report = await explainAllInvestigations(report, llmConfig);
             }
 
-            for (const investigation of report.investigations) {
-              process.stdout.write(formatInvestigation(investigation) + '\n\n');
+            if (opts['json']) {
+              process.stdout.write(
+                JSON.stringify(serializeInvestigationReport(report), null, 2) + '\n',
+              );
+            } else {
+              for (const investigation of report.investigations) {
+                process.stdout.write(formatInvestigation(investigation) + '\n\n');
+              }
             }
           }
         } catch (err) {

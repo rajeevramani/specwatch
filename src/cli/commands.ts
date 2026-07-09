@@ -14,6 +14,7 @@
  */
 
 import { Command } from 'commander';
+import { writeFileSync } from 'node:fs';
 import { getDatabase } from '../storage/database.js';
 import { SessionRepository } from '../storage/sessions.js';
 import { SampleRepository } from '../storage/samples.js';
@@ -242,6 +243,26 @@ export function createProgram(): Command {
         let dashboard: DashboardModel | undefined;
         let dash: DashboardHandle | undefined;
 
+        // Cut a cumulative snapshot now. Shared by auto-aggregate and the TUI
+        // `a` hotkey so both build snapshots the same way.
+        const performSnapshot = (): { ok: boolean; msg: string } => {
+          currentSnapshot++;
+          let ok = true;
+          let msg: string;
+          try {
+            const result = runAggregation(db, session.id, {
+              snapshot: currentSnapshot,
+              skipStateTransition: true,
+            });
+            msg = `Snapshot ${currentSnapshot}: ${result.schemas.length} endpoints from ${result.sampleCount} samples`;
+          } catch (aggErr) {
+            ok = false;
+            msg = `Aggregation failed: ${aggErr instanceof Error ? aggErr.message : String(aggErr)}`;
+          }
+          samplesSinceLastSnapshot = 0;
+          return { ok, msg };
+        };
+
         // Create a new proxy with proper async capture
         const _captureProxy = new ProxyServer({
           targetUrl,
@@ -353,25 +374,14 @@ export function createProgram(): Command {
             if (maxSamples !== undefined && samplesSinceLastSnapshot >= maxSamples) {
               if (autoAggregate) {
                 // Auto-aggregate: create a new cumulative snapshot and keep going
-                currentSnapshot++;
                 if (!useTui)
                   info(
-                    `\nAuto-aggregating snapshot ${currentSnapshot} (${sampleCount} total samples)...`,
+                    `\nAuto-aggregating snapshot ${currentSnapshot + 1} (${sampleCount} total samples)...`,
                   );
-                try {
-                  const result = runAggregation(db, session.id, {
-                    snapshot: currentSnapshot,
-                    skipStateTransition: true,
-                  });
-                  const msg = `Snapshot ${currentSnapshot}: ${result.schemas.length} endpoints from ${result.sampleCount} samples`;
-                  if (useTui) dashboard?.recordSnapshot(currentSnapshot, msg);
-                  else success(msg);
-                } catch (aggErr) {
-                  const emsg = `Auto-aggregation failed: ${aggErr instanceof Error ? aggErr.message : String(aggErr)}`;
-                  if (useTui) dashboard?.setMessage(emsg);
-                  else logError(emsg);
-                }
-                samplesSinceLastSnapshot = 0;
+                const { ok, msg } = performSnapshot();
+                if (useTui) dashboard?.recordSnapshot(currentSnapshot, msg);
+                else if (ok) success(msg);
+                else logError(msg);
               } else {
                 // No auto-aggregate: stop capturing
                 if (useTui) dashboard?.setMessage(`Reached max samples (${maxSamples}). Stopping…`);
@@ -437,6 +447,34 @@ export function createProgram(): Command {
             // Route quit through the existing SIGINT handler so aggregation
             // and double-Ctrl+C force-quit semantics stay in one place.
             onQuit: () => process.kill(process.pid, 'SIGINT'),
+            // `a` — aggregate now: cut a cumulative snapshot without stopping.
+            onAggregate: () => {
+              const { msg } = performSnapshot();
+              dashboard?.recordSnapshot(currentSnapshot, msg);
+            },
+            // `e` — export the latest snapshot to a YAML file (never stdout,
+            // which would corrupt the live render). Status shown in the footer.
+            onExport: () => {
+              try {
+                const schemaRepo = new AggregatedSchemaRepository(db);
+                const schemas = schemaRepo.listBySessionLatestSnapshot(session.id);
+                if (schemas.length === 0) {
+                  dashboard?.setMessage("Nothing to export yet — press 'a' to aggregate first");
+                  return;
+                }
+                const doc = buildOpenApiDocument(schemas, {
+                  servers: session.targetUrl ? [session.targetUrl] : undefined,
+                });
+                const yaml = serializeOpenApi(doc, 'yaml');
+                const file = `specwatch-${session.name ?? session.id.slice(0, 8)}-snapshot${currentSnapshot}.yaml`;
+                writeFileSync(file, yaml + '\n', 'utf8');
+                dashboard?.setMessage(`Exported ${schemas.length} endpoints → ${file}`);
+              } catch (exportErr) {
+                dashboard?.setMessage(
+                  `Export failed: ${exportErr instanceof Error ? exportErr.message : String(exportErr)}`,
+                );
+              }
+            },
           });
         } else {
           info(`Specwatch proxy started`);

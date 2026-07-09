@@ -17,11 +17,22 @@ export interface DashboardHandle {
   unmount: () => void;
 }
 
-export function renderDashboard(model: DashboardModel, opts: { onQuit: () => void }): DashboardHandle {
-  const instance = render(React.createElement(App, { model, onQuit: opts.onQuit }), {
-    // Our SIGINT/quit path runs aggregation; don't let Ink hard-exit first.
-    exitOnCtrlC: false,
-  });
+export function renderDashboard(
+  model: DashboardModel,
+  opts: { onQuit: () => void; onAggregate?: () => void; onExport?: () => void },
+): DashboardHandle {
+  const instance = render(
+    React.createElement(App, {
+      model,
+      onQuit: opts.onQuit,
+      onAggregate: opts.onAggregate,
+      onExport: opts.onExport,
+    }),
+    {
+      // Our SIGINT/quit path runs aggregation; don't let Ink hard-exit first.
+      exitOnCtrlC: false,
+    },
+  );
   return {
     unmount: () => instance.unmount(),
   };

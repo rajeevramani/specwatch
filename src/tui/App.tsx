@@ -69,9 +69,11 @@ function Row({ row }: { row: EndpointRow }) {
 export interface AppProps {
   model: DashboardModel;
   onQuit: () => void;
+  onAggregate?: () => void;
+  onExport?: () => void;
 }
 
-export function App({ model, onQuit }: AppProps) {
+export function App({ model, onQuit, onAggregate, onExport }: AppProps) {
   const { exit } = useApp();
   const [, force] = useReducer((n: number) => n + 1, 0);
   const [now, setNow] = useState(model.state.startedAt);
@@ -101,6 +103,15 @@ export function App({ model, onQuit }: AppProps) {
     if (input === 'q' || (key.ctrl && input === 'c')) {
       exit();
       onQuit();
+      return;
+    }
+    // Hotkeys: `a` aggregate-now, `e` export. No-ops if the host didn't wire them.
+    if (input === 'a') {
+      onAggregate?.();
+      return;
+    }
+    if (input === 'e') {
+      onExport?.();
       return;
     }
     // Scroll the endpoint viewport. Up/Down arrows or k/j (vim-style).
@@ -203,7 +214,9 @@ export function App({ model, onQuit }: AppProps) {
           <Text color="yellow">{s.lastMessage}</Text>
         ) : (
           <Text dimColor>
-            {rows.length > MAX_ROWS ? '↑/↓ or j/k scroll   ' : ''}q or Ctrl+C — stop & aggregate
+            {rows.length > MAX_ROWS ? '↑/↓ or j/k scroll   ' : ''}
+            {onAggregate ? 'a aggregate   ' : ''}
+            {onExport ? 'e export   ' : ''}q or Ctrl+C — stop & aggregate
           </Text>
         )}
       </Box>

@@ -1,0 +1,656 @@
+{
+  "generatedAt": "2026-06-06T03:56:20.127Z",
+  "variant": "no-error-schemas",
+  "agent": "openrouter:anthropic/claude-sonnet-4.5",
+  "model": "anthropic/claude-sonnet-4.5",
+  "provider": "openrouter",
+  "live": true,
+  "system": "assistant",
+  "taskSet": "goal",
+  "systemPrompt": "You are an online shopping assistant for an e-commerce store. You manage customers, orders, and line-items by calling the store API through the tools provided. A colleague hands you a request in plain language; work out which operations achieve it and carry them out. Lean on each tool’s description to understand what it does and which fields it needs — the request will not name the operations for you. Most requests need several dependent calls: create or look up something, then use the id it returns in the next call. Check each result before the next step. When the request is fully handled, give a one-line summary. Act autonomously; do not ask questions.",
+  "thinResponses": false,
+  "passCount": 8,
+  "failCount": 0,
+  "records": [
+    {
+      "variant": "no-error-schemas",
+      "taskId": "t1_onboard_and_cancel",
+      "success": true,
+      "detail": "customer created and their single order is cancelled",
+      "callCount": 3,
+      "steps": 4,
+      "truncated": false,
+      "transcript": [
+        {
+          "kind": "prompt",
+          "text": "Margaret Hamilton (margaret.hamilton@calib.test) is a brand-new shopper. Get her registered and start an order for her — but she immediately has second thoughts, so make sure that order is called off and will not be fulfilled."
+        },
+        {
+          "kind": "assistant",
+          "text": "I'll help you register Margaret Hamilton, create an order for her, and then cancel it. Let me work through this step by step.\n\nFirst, let me create her customer account:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_019KS1wX6ExKetkUo8arP8nV",
+              "name": "createCustomer",
+              "input": {
+                "name": "Margaret Hamilton",
+                "email": "margaret.hamilton@calib.test"
+              },
+              "status": 201,
+              "response": "{\"id\":\"cus_004\",\"name\":\"Margaret Hamilton\",\"email\":\"margaret.hamilton@calib.test\",\"created_at\":\"2026-06-06T03:55:12.451Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/customers",
+              "normalizedPath": "/customers",
+              "capturedAt": "2026-06-06T03:55:12.452Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Great! Now let me create an order for her:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01A6FBi8EujMq2D5xTZts4yL",
+              "name": "createOrder",
+              "input": {
+                "customer_id": "cus_004"
+              },
+              "status": 201,
+              "response": "{\"id\":\"ord_004\",\"customer_id\":\"cus_004\",\"status\":\"pending\",\"created_at\":\"2026-06-06T03:55:15.201Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/orders",
+              "normalizedPath": "/orders",
+              "capturedAt": "2026-06-06T03:55:15.203Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Now let me cancel that order since she had second thoughts:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_0192734Qui3W8L5pge82g6EV",
+              "name": "cancelOrder",
+              "input": {
+                "orderId": "ord_004"
+              },
+              "status": 200,
+              "response": "{\"id\":\"ord_004\",\"customer_id\":\"cus_004\",\"status\":\"cancelled\",\"created_at\":\"2026-06-06T03:55:15.201Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/orders/ord_004/cancel",
+              "normalizedPath": "/orders/{orderId}/cancel",
+              "capturedAt": "2026-06-06T03:55:17.186Z"
+            }
+          ]
+        },
+        {
+          "kind": "final",
+          "text": "Done! Margaret Hamilton is registered as customer cus_004, an order was started for her, and it has been cancelled so it won't be fulfilled."
+        }
+      ]
+    },
+    {
+      "variant": "no-error-schemas",
+      "taskId": "t2_place_order_and_pay",
+      "success": true,
+      "detail": "paid order with the two specified line-items exists",
+      "callCount": 4,
+      "steps": 4,
+      "truncated": false,
+      "transcript": [
+        {
+          "kind": "prompt",
+          "text": "Set up Katherine Johnson (katherine.johnson@calib.test) as a customer and ring up her basket: 3 of CALIB-ALPHA at 1000 each, and 1 of CALIB-BETA at 4999. She is paying now, so the order should end up settled."
+        },
+        {
+          "kind": "assistant",
+          "text": "I'll help you set up Katherine Johnson as a customer and process her order. Let me work through this step by step.\n\nFirst, I'll create the customer account:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01AEnVaG9eckX6zvZJFNsnUB",
+              "name": "createCustomer",
+              "input": {
+                "name": "Katherine Johnson",
+                "email": "katherine.johnson@calib.test"
+              },
+              "status": 201,
+              "response": "{\"id\":\"cus_004\",\"name\":\"Katherine Johnson\",\"email\":\"katherine.johnson@calib.test\",\"created_at\":\"2026-06-06T03:55:21.323Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/customers",
+              "normalizedPath": "/customers",
+              "capturedAt": "2026-06-06T03:55:21.326Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Great! Now I'll create an order for Katherine with status \"paid\" since she's paying now:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01Y9dCuqYfhWxQwd6epcPCo2",
+              "name": "createOrder",
+              "input": {
+                "customer_id": "cus_004",
+                "status": "paid"
+              },
+              "status": 201,
+              "response": "{\"id\":\"ord_004\",\"customer_id\":\"cus_004\",\"status\":\"paid\",\"created_at\":\"2026-06-06T03:55:23.639Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/orders",
+              "normalizedPath": "/orders",
+              "capturedAt": "2026-06-06T03:55:23.640Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Perfect! Now I'll add the line items to the order:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01L3kATw9ZB3BeVexnyr28S9",
+              "name": "createLineItem",
+              "input": {
+                "order_id": "ord_004",
+                "sku": "CALIB-ALPHA",
+                "quantity": 3,
+                "unit_price": 1000
+              },
+              "status": 201,
+              "response": "{\"id\":\"li_005\",\"order_id\":\"ord_004\",\"sku\":\"CALIB-ALPHA\",\"quantity\":3,\"unit_price\":1000}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/line-items",
+              "normalizedPath": "/line-items",
+              "capturedAt": "2026-06-06T03:55:26.405Z"
+            },
+            {
+              "id": "toolu_bdrk_01BxtLnNdK22w3sS1JmCbGd6",
+              "name": "createLineItem",
+              "input": {
+                "order_id": "ord_004",
+                "sku": "CALIB-BETA",
+                "quantity": 1,
+                "unit_price": 4999
+              },
+              "status": 201,
+              "response": "{\"id\":\"li_006\",\"order_id\":\"ord_004\",\"sku\":\"CALIB-BETA\",\"quantity\":1,\"unit_price\":4999}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/line-items",
+              "normalizedPath": "/line-items",
+              "capturedAt": "2026-06-06T03:55:26.407Z"
+            }
+          ]
+        },
+        {
+          "kind": "final",
+          "text": "Perfect! Katherine Johnson has been set up as a customer with a paid order containing 3 CALIB-ALPHA items at 1000 each and 1 CALIB-BETA at 4999."
+        }
+      ]
+    },
+    {
+      "variant": "no-error-schemas",
+      "taskId": "t3_fulfil_pending_order",
+      "success": true,
+      "detail": "Ada's formerly-pending order is now shipped and none remain pending",
+      "callCount": 4,
+      "steps": 5,
+      "truncated": false,
+      "transcript": [
+        {
+          "kind": "prompt",
+          "text": "Ada Lovelace (ada@example.com) has an order sitting unpaid in the queue. She has now paid for it and it is ready to leave the warehouse — move that order all the way through to dispatched."
+        },
+        {
+          "kind": "assistant",
+          "text": "I'll help you update Ada Lovelace's order from unpaid to dispatched. Let me start by finding her customer record and then her order.",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01TwAbJDBdYuB4iSDm4LFrby",
+              "name": "listCustomers",
+              "input": {},
+              "status": 200,
+              "response": "[{\"id\":\"cus_001\",\"name\":\"Ada Lovelace\",\"email\":\"ada@example.com\",\"created_at\":\"2026-01-01T00:00:00.000Z\"},{\"id\":\"cus_002\",\"name\":\"Alan Turing\",\"email\":\"alan@example.com\",\"created_at\":\"2026-01-01T00:00:00.000Z\"},{\"id\":\"cus_003\",\"name\":\"Grace Hopper\",\"email\":\"grace@example.com\",\"created_at\":\"2026-01-01T00:00:00.000Z\"}]",
+              "isError": false,
+              "httpMethod": "GET",
+              "rawPath": "/customers",
+              "normalizedPath": "/customers",
+              "capturedAt": "2026-06-06T03:55:30.987Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Great! I found Ada Lovelace with customer ID `cus_001`. Now let me get her orders.",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_015CssDg2cJMrXHWLDxoHZ51",
+              "name": "listOrders",
+              "input": {
+                "customer_id": "cus_001"
+              },
+              "status": 200,
+              "response": "[{\"id\":\"ord_001\",\"customer_id\":\"cus_001\",\"status\":\"paid\",\"created_at\":\"2026-01-01T00:00:00.000Z\"},{\"id\":\"ord_002\",\"customer_id\":\"cus_001\",\"status\":\"pending\",\"created_at\":\"2026-01-01T00:00:00.000Z\"}]",
+              "isError": false,
+              "httpMethod": "GET",
+              "rawPath": "/orders?customer_id=cus_001",
+              "normalizedPath": "/orders",
+              "capturedAt": "2026-06-06T03:55:32.986Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "I can see Ada has two orders:\n- `ord_001` with status \"paid\" \n- `ord_002` with status \"pending\" (unpaid)\n\nSince the request mentions an unpaid order that has now been paid and is ready to ship, I need to update `ord_002` from \"pending\" to \"paid\" first, then to \"shipped\" (dispatched).",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01Qd5vRM36KatCvSwbJ53VWy",
+              "name": "updateOrder",
+              "input": {
+                "orderId": "ord_002",
+                "status": "paid"
+              },
+              "status": 200,
+              "response": "{\"id\":\"ord_002\",\"customer_id\":\"cus_001\",\"status\":\"paid\",\"created_at\":\"2026-01-01T00:00:00.000Z\"}",
+              "isError": false,
+              "httpMethod": "PUT",
+              "rawPath": "/orders/ord_002",
+              "normalizedPath": "/orders/{orderId}",
+              "capturedAt": "2026-06-06T03:55:36.361Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Perfect! The order is now marked as \"paid\". Now let me update it to \"shipped\" to indicate it has been dispatched from the warehouse.",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_013U69ekchUto1KcZpnAGzky",
+              "name": "updateOrder",
+              "input": {
+                "orderId": "ord_002",
+                "status": "shipped"
+              },
+              "status": 200,
+              "response": "{\"id\":\"ord_002\",\"customer_id\":\"cus_001\",\"status\":\"shipped\",\"created_at\":\"2026-01-01T00:00:00.000Z\"}",
+              "isError": false,
+              "httpMethod": "PUT",
+              "rawPath": "/orders/ord_002",
+              "normalizedPath": "/orders/{orderId}",
+              "capturedAt": "2026-06-06T03:55:38.661Z"
+            }
+          ]
+        },
+        {
+          "kind": "final",
+          "text": "Done! Ada Lovelace's order (ord_002) has been updated from pending through paid to shipped status."
+        }
+      ]
+    },
+    {
+      "variant": "no-error-schemas",
+      "taskId": "t4_correct_line_item_quantity",
+      "success": true,
+      "detail": "WIDGET-A on ord_001 has quantity 7 with unit price preserved",
+      "callCount": 2,
+      "steps": 3,
+      "truncated": false,
+      "transcript": [
+        {
+          "kind": "prompt",
+          "text": "On order ord_001 the WIDGET-A line was entered with the wrong count. Fix it so that line reflects 7 units. The price per unit (1500) is correct — leave it alone."
+        },
+        {
+          "kind": "assistant",
+          "text": "I'll help you fix the quantity on the WIDGET-A line item in order ord_001. Let me first find the line items for that order, then update the correct one.",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_012bwgW8Nq12DL5KKTp4sUxC",
+              "name": "listLineItems",
+              "input": {
+                "order_id": "ord_001"
+              },
+              "status": 200,
+              "response": "[{\"id\":\"li_001\",\"order_id\":\"ord_001\",\"sku\":\"WIDGET-A\",\"quantity\":2,\"unit_price\":1500},{\"id\":\"li_002\",\"order_id\":\"ord_001\",\"sku\":\"WIDGET-B\",\"quantity\":1,\"unit_price\":3000}]",
+              "isError": false,
+              "httpMethod": "GET",
+              "rawPath": "/line-items?order_id=ord_001",
+              "normalizedPath": "/line-items",
+              "capturedAt": "2026-06-06T03:55:43.698Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Perfect! I found the WIDGET-A line item (li_001) with quantity 2. Now I'll update it to 7 units while keeping the unit price at 1500.",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01RuYeQG75fpJtSR9p8jQQXM",
+              "name": "updateLineItem",
+              "input": {
+                "lineItemId": "li_001",
+                "sku": "WIDGET-A",
+                "quantity": 7,
+                "unit_price": 1500
+              },
+              "status": 200,
+              "response": "{\"id\":\"li_001\",\"order_id\":\"ord_001\",\"sku\":\"WIDGET-A\",\"quantity\":7,\"unit_price\":1500}",
+              "isError": false,
+              "httpMethod": "PUT",
+              "rawPath": "/line-items/li_001",
+              "normalizedPath": "/line-items/{lineItemId}",
+              "capturedAt": "2026-06-06T03:55:46.325Z"
+            }
+          ]
+        },
+        {
+          "kind": "final",
+          "text": "Done! Updated the WIDGET-A line item on order ord_001 from 2 units to 7 units, keeping the unit price at 1500."
+        }
+      ]
+    },
+    {
+      "variant": "no-error-schemas",
+      "taskId": "t5_onboard_rename_offboard",
+      "success": true,
+      "detail": "keeper customer renamed and present; reject customer removed",
+      "callCount": 4,
+      "steps": 3,
+      "truncated": false,
+      "transcript": [
+        {
+          "kind": "prompt",
+          "text": "Two shoppers signed up: 'Temp Keeper' (keep.user@calib.test) and 'Temp Reject' (reject.user@calib.test). The first one's name should actually be 'Permanent Keeper' — correct it, keeping the same email. The second signed up by mistake and wants their account removed from the system entirely."
+        },
+        {
+          "kind": "assistant",
+          "text": "I'll help you handle these two customer accounts. Let me:\n1. Create both customers\n2. Update the first customer's name\n3. Delete the second customer",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01QZzuQmooPhDErh9xmrj8Me",
+              "name": "createCustomer",
+              "input": {
+                "name": "Temp Keeper",
+                "email": "keep.user@calib.test"
+              },
+              "status": 201,
+              "response": "{\"id\":\"cus_004\",\"name\":\"Temp Keeper\",\"email\":\"keep.user@calib.test\",\"created_at\":\"2026-06-06T03:55:51.565Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/customers",
+              "normalizedPath": "/customers",
+              "capturedAt": "2026-06-06T03:55:51.566Z"
+            },
+            {
+              "id": "toolu_bdrk_01SExNut6oXbMppKKYVwtp2h",
+              "name": "createCustomer",
+              "input": {
+                "name": "Temp Reject",
+                "email": "reject.user@calib.test"
+              },
+              "status": 201,
+              "response": "{\"id\":\"cus_005\",\"name\":\"Temp Reject\",\"email\":\"reject.user@calib.test\",\"created_at\":\"2026-06-06T03:55:51.568Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/customers",
+              "normalizedPath": "/customers",
+              "capturedAt": "2026-06-06T03:55:51.570Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Now I'll update the first customer's name and delete the second customer:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01X7JfaqyZRg5gaE8JSH7ybj",
+              "name": "updateCustomer",
+              "input": {
+                "customerId": "cus_004",
+                "name": "Permanent Keeper",
+                "email": "keep.user@calib.test"
+              },
+              "status": 200,
+              "response": "{\"id\":\"cus_004\",\"name\":\"Permanent Keeper\",\"email\":\"keep.user@calib.test\",\"created_at\":\"2026-06-06T03:55:51.565Z\"}",
+              "isError": false,
+              "httpMethod": "PUT",
+              "rawPath": "/customers/cus_004",
+              "normalizedPath": "/customers/{customerId}",
+              "capturedAt": "2026-06-06T03:55:53.899Z"
+            },
+            {
+              "id": "toolu_bdrk_01EUhvi3qndj9YPyysfztNrg",
+              "name": "deleteCustomer",
+              "input": {
+                "customerId": "cus_005"
+              },
+              "status": 204,
+              "response": "",
+              "isError": false,
+              "httpMethod": "DELETE",
+              "rawPath": "/customers/cus_005",
+              "normalizedPath": "/customers/{customerId}",
+              "capturedAt": "2026-06-06T03:55:53.899Z"
+            }
+          ]
+        },
+        {
+          "kind": "final",
+          "text": "Done! Created both accounts, corrected 'Temp Keeper' to 'Permanent Keeper' (keeping the same email), and permanently removed 'Temp Reject' from the system."
+        }
+      ]
+    },
+    {
+      "variant": "no-error-schemas",
+      "taskId": "t6_reserve_unpaid_order",
+      "success": true,
+      "detail": "unpaid order with the COMPILER-9 line reserved for the new customer",
+      "callCount": 3,
+      "steps": 4,
+      "truncated": false,
+      "transcript": [
+        {
+          "kind": "prompt",
+          "text": "Grace Hopper (grace.hopper@calib.test) is a new customer who wants to reserve 2 units of COMPILER-9 at 500 each. Register her and put the order together, but she will pay later — leave it open and unpaid for now."
+        },
+        {
+          "kind": "assistant",
+          "text": "I'll help you register Grace Hopper as a new customer and create an order with the specified line item. Let me start by creating her customer account.",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01RZUQ1igAbUw4q6zBTi1ud2",
+              "name": "createCustomer",
+              "input": {
+                "name": "Grace Hopper",
+                "email": "grace.hopper@calib.test"
+              },
+              "status": 201,
+              "response": "{\"id\":\"cus_004\",\"name\":\"Grace Hopper\",\"email\":\"grace.hopper@calib.test\",\"created_at\":\"2026-06-06T03:55:59.321Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/customers",
+              "normalizedPath": "/customers",
+              "capturedAt": "2026-06-06T03:55:59.322Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Great! Now I'll create an order for Grace with status \"pending\" (unpaid).",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01UA6Vn5Kg2hp1XdCm51Ls6V",
+              "name": "createOrder",
+              "input": {
+                "customer_id": "cus_004",
+                "status": "pending"
+              },
+              "status": 201,
+              "response": "{\"id\":\"ord_004\",\"customer_id\":\"cus_004\",\"status\":\"pending\",\"created_at\":\"2026-06-06T03:56:01.565Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/orders",
+              "normalizedPath": "/orders",
+              "capturedAt": "2026-06-06T03:56:01.566Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Perfect! Now I'll add the line item for 2 units of COMPILER-9 at 500 each.",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01WNcpMFg9XN9mz4RkQhYmtn",
+              "name": "createLineItem",
+              "input": {
+                "order_id": "ord_004",
+                "sku": "COMPILER-9",
+                "quantity": 2,
+                "unit_price": 500
+              },
+              "status": 201,
+              "response": "{\"id\":\"li_005\",\"order_id\":\"ord_004\",\"sku\":\"COMPILER-9\",\"quantity\":2,\"unit_price\":500}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/line-items",
+              "normalizedPath": "/line-items",
+              "capturedAt": "2026-06-06T03:56:03.956Z"
+            }
+          ]
+        },
+        {
+          "kind": "final",
+          "text": "Done! Grace Hopper is registered as customer cus_004 with a pending order (ord_004) for 2 units of COMPILER-9 at 500 each, ready for payment later."
+        }
+      ]
+    },
+    {
+      "variant": "no-error-schemas",
+      "taskId": "t7_erase_mistaken_order",
+      "success": true,
+      "detail": "ord_002 was removed from the records entirely",
+      "callCount": 1,
+      "steps": 2,
+      "truncated": false,
+      "transcript": [
+        {
+          "kind": "prompt",
+          "text": "Order ord_002 was opened by mistake and needs to be erased from the records completely — not merely called off, but actually removed."
+        },
+        {
+          "kind": "assistant",
+          "text": "I'll delete order ord_002 completely from the system.",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01396xnFqtcPoZe4jx1t99Ak",
+              "name": "deleteOrder",
+              "input": {
+                "orderId": "ord_002"
+              },
+              "status": 204,
+              "response": "",
+              "isError": false,
+              "httpMethod": "DELETE",
+              "rawPath": "/orders/ord_002",
+              "normalizedPath": "/orders/{orderId}",
+              "capturedAt": "2026-06-06T03:56:08.383Z"
+            }
+          ]
+        },
+        {
+          "kind": "final",
+          "text": "Order ord_002 has been permanently deleted from the records along with all its line items."
+        }
+      ]
+    },
+    {
+      "variant": "no-error-schemas",
+      "taskId": "t8_record_completed_sale",
+      "success": true,
+      "detail": "fully-paid order with the ENIGMA line recorded for the new customer",
+      "callCount": 3,
+      "steps": 4,
+      "truncated": false,
+      "transcript": [
+        {
+          "kind": "prompt",
+          "text": "Record a completed sale for Alan Turing (alan.turing@calib.test): he bought 1 unit of ENIGMA at 9999 and has already paid in full. Set up the customer and the order so they reflect that fully-paid purchase."
+        },
+        {
+          "kind": "assistant",
+          "text": "I'll help you record this completed sale for Alan Turing. Let me break this down:\n1. Create the customer (Alan Turing)\n2. Create an order with \"paid\" status\n3. Add the line item (1 ENIGMA at 9999)\n\nLet me start:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01JPLJhu6xvWMMfr5J2D2oyN",
+              "name": "createCustomer",
+              "input": {
+                "name": "Alan Turing",
+                "email": "alan.turing@calib.test"
+              },
+              "status": 201,
+              "response": "{\"id\":\"cus_004\",\"name\":\"Alan Turing\",\"email\":\"alan.turing@calib.test\",\"created_at\":\"2026-06-06T03:56:13.586Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/customers",
+              "normalizedPath": "/customers",
+              "capturedAt": "2026-06-06T03:56:13.587Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Great! Now I'll create a paid order for this customer:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01QLdPGyvKC5Pp6BYo463cRB",
+              "name": "createOrder",
+              "input": {
+                "customer_id": "cus_004",
+                "status": "paid"
+              },
+              "status": 201,
+              "response": "{\"id\":\"ord_004\",\"customer_id\":\"cus_004\",\"status\":\"paid\",\"created_at\":\"2026-06-06T03:56:15.872Z\"}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/orders",
+              "normalizedPath": "/orders",
+              "capturedAt": "2026-06-06T03:56:15.873Z"
+            }
+          ]
+        },
+        {
+          "kind": "assistant",
+          "text": "Perfect! Now I'll add the line item for 1 ENIGMA unit at 9999:",
+          "toolCalls": [
+            {
+              "id": "toolu_bdrk_01GisDkAz4wdcmnyqu1tznTM",
+              "name": "createLineItem",
+              "input": {
+                "order_id": "ord_004",
+                "sku": "ENIGMA",
+                "quantity": 1,
+                "unit_price": 9999
+              },
+              "status": 201,
+              "response": "{\"id\":\"li_005\",\"order_id\":\"ord_004\",\"sku\":\"ENIGMA\",\"quantity\":1,\"unit_price\":9999}",
+              "isError": false,
+              "httpMethod": "POST",
+              "rawPath": "/line-items",
+              "normalizedPath": "/line-items",
+              "capturedAt": "2026-06-06T03:56:18.308Z"
+            }
+          ]
+        },
+        {
+          "kind": "final",
+          "text": "Done! Created customer Alan Turing with a fully-paid order containing 1 ENIGMA unit at 9999."
+        }
+      ]
+    }
+  ]
+}

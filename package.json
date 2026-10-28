@@ -1,6 +1,6 @@
 {
   "name": "specwatch",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "Zero-infrastructure developer tool that learns API schemas from live traffic and generates OpenAPI specs",
   "type": "module",
   "bin": {
@@ -12,7 +12,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsup",

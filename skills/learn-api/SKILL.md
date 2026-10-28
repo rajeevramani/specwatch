@@ -19,7 +19,7 @@ This skill is **candidate-only and unlisted**. The published npm `0.3.2` and old
 
 Require an explicitly approved repaired candidate identity: source/build identity, exact tarball SHA-256, installed CLI SHA-256, reported version and runtime/platform qualification. Verify the actual local hashes using the host's available checksum facility; do not invent a hash or accept a matching version alone. In a local rehearsal, record those identities against the authorized repaired source and real qualification output. If no trustworthy repaired candidate is available, stop rather than falling back to an old binary. A published minimum version can be documented only after that repaired artifact is released and verified.
 
-Use the tested Node22 runtime for this candidate. Although its manifest currently declares >=20, some runtime dependencies declare >=22; passing tests with engine warnings is not support-policy approval. Native dependencies must be installed/built for the active runtime and architecture. Installation and dependency build scripts require permission; do not silently install software.
+The approved local `0.4.0` candidate requires Node.js >=22; the manifest and runtime dependencies agree. Earlier Node20 execution does not qualify this candidate or restore Node20 support. Native dependencies must be installed/built for the active runtime and architecture. Installation and dependency build scripts require permission; do not silently install software.
 
 ## Permission and ownership
 
@@ -53,7 +53,7 @@ Completion: actual binary/runtime identity matches the approved repaired candida
 "$SPECWATCH_CLI" start "https://approved-api.example" --port 8080 --name "api-learning" --max-samples 200 --consumer agent
 ```
 
-The URL, port, name and limit are caller-chosen. `--consumer agent` selects non-dashboard output; it does not call an external agent or LLM. Keep this process attached to its foreground terminal, or retain its exact tracked-process handle. Do not detach an untracked process. This sequence deliberately omits auto-aggregation.
+The URL, port, name and limit are caller-chosen. `--consumer agent` records the session for agent analysis; both human and agent sessions use plain capture output in this candidate. It does not call an external agent or LLM. Keep this process attached to its foreground terminal, or retain its exact tracked-process handle. Do not detach an untracked process. This sequence deliberately omits auto-aggregation.
 
 Confirm the actual readiness line `Specwatch proxy started` on stderr within a bounded startup window. Abort on early exit, a startup error or timeout; clean up only the process you started. Do not proceed merely because a PID exists. Avoid making an HTTP readiness probe that accidentally becomes unaccounted captured traffic.
 

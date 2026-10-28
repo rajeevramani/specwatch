@@ -10,9 +10,9 @@ It runs as a local reverse proxy with SQLite storage. Schema inference and ordin
 
 ## Unreleased candidate status
 
-This branch documents an **unreleased source candidate**, not the currently published npm package. npm `latest` is `0.3.2`; the historical local `0.3.4` version string does not identify the repaired bytes uniquely. Neither `0.3.3` nor `0.3.4` is an evidenced npm release. A new release version has not been approved.
+This branch documents the human-approved **local candidate `0.4.0`**, not a published release. npm `latest` remains `0.3.2`; neither `0.3.3` nor the historical local `0.3.4` label is an evidenced npm release. Version approval authorizes preparation and exact-package qualification only, not publication. A version string alone does not identify verified repaired bytes.
 
-The header privacy correction, default JSON agent output, live capture dashboard and investigation JSON described below are candidate behavior. **Do not install `latest` or an old package while assuming it has these guarantees.** Use an explicitly approved repaired candidate, recording its tarball checksum and installed CLI checksum/version. The standalone source skill at `skills/learn-api/SKILL.md` is candidate-only and unlisted until a repaired published artifact is verified.
+The header privacy correction, default JSON agent output, plain capture output and investigation JSON described below are candidate behavior. **Do not install `latest` or an old package while assuming it has these guarantees.** Use an explicitly approved repaired candidate, recording its tarball checksum and installed CLI checksum/version. The standalone source skill at `skills/learn-api/SKILL.md` is candidate-only and unlisted until a repaired published artifact is verified.
 
 Commands below assume that exact installed candidate is available as `specwatch`. For source development, run `npm ci` and `npm run build`, then substitute `node dist/index.js` for `specwatch`. Installation may run native dependency build scripts; approve installation before running it. These are local preparation instructions, not a release or publication announcement.
 
@@ -62,7 +62,7 @@ specwatch snapshots --name "my-api"
 specwatch export --name "my-api" --snapshot 2 --include-metadata --output snapshot-2.yaml
 ```
 
-On an interactive terminal, human sessions show a dashboard with endpoint/sample counts and scrolling (`j`/`k` or arrow keys). Hotkeys: `a` aggregate, `e` export the current snapshot, `q` stop and aggregate. Piped output, quiet mode and agent sessions use line-oriented output instead. Review output-file permissions before using the export hotkey.
+Human sessions use plain, line-oriented output even on an interactive terminal. Stop the owned process with `Ctrl+C`; inspect snapshots and export through the explicit commands above. The previously developed dashboard is dormant and unsupported in `0.4.0`, with no CLI opt-in or dashboard hotkeys. It is not claimed fixed or qualified.
 
 ### What inference captures
 
@@ -166,7 +166,7 @@ Prefer `Ctrl+C` on the owned foreground capture. The `stop` command can mark the
 
 ## Runtime requirements and development
 
-The package currently declares Node.js >=20, but its Ink dependencies declare >=22. Local tests have executed on Node20 and Node22; that does **not** resolve the declared-support conflict or qualify the interactive TUI on Node20. Use the tested Node22 runtime for candidate rehearsals while support policy is being resolved. Do not override engine checks and call the result supported.
+The candidate requires **Node.js >=22**, matching its Ink dependency requirements; CI targets Node22. Node20 is no longer a supported runtime for this candidate. Earlier Node20 execution of the historical package is not support or interactive-TUI qualification for `0.4.0`. Qualification is specific to the exact installed artifact, runtime and platform; do not override engine checks and call the result supported.
 
 ```bash
 npm ci
@@ -176,7 +176,7 @@ npm run typecheck
 npm run lint
 ```
 
-`npm run test` builds the CLI before Vitest so subprocess tests exercise the current bundle. `npm run format` rewrites source formatting; avoid running it across unrelated user edits. CI checks lint, typecheck, tests and build on its configured Node matrix; local success is not evidence that remote CI ran.
+Source tests require Python3 for the owned real-terminal regression (configured explicitly in CI); the installed CLI does not require Python. `npm run test` builds the CLI before Vitest so subprocess tests exercise the current bundle. `npm run format` rewrites source formatting; avoid running it across unrelated user edits. CI checks lint, typecheck, tests and build on its configured Node matrix; local success is not evidence that remote CI ran.
 
 ## License
 

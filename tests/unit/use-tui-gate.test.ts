@@ -1,15 +1,14 @@
 /**
- * Unit tests for the useTui gate predicate — the TUI renders only for an
- * interactive, human, non-quiet session; every other combination falls back
- * to the line printer.
+ * Approved 0.4.0 contract: the legacy dashboard is dormant. All capture
+ * contexts, including interactive human terminals, use the line printer.
  */
 
 import { describe, it, expect } from 'vitest';
 import { shouldUseTui } from '../../src/cli/output.js';
 
 describe('shouldUseTui gate', () => {
-  it('true only for interactive + human + not quiet', () => {
-    expect(shouldUseTui(true, 'human', false)).toBe(true);
+  it('keeps the dashboard dormant even for interactive human capture', () => {
+    expect(shouldUseTui(true, 'human', false)).toBe(false);
   });
 
   it('false when stdout is not a TTY (piped)', () => {
@@ -26,7 +25,7 @@ describe('shouldUseTui gate', () => {
 
   it('full truth matrix', () => {
     const rows: Array<[boolean, string, boolean, boolean]> = [
-      [true, 'human', false, true],
+      [true, 'human', false, false],
       [true, 'human', true, false],
       [true, 'agent', false, false],
       [true, 'agent', true, false],

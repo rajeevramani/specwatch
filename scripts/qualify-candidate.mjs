@@ -5,7 +5,8 @@
  * Builds/packs this source, installs dependencies in the owned output directory,
  * exercises a loopback fixture, and retains report.json plus exact artifacts/logs.
  * Caller must authorize installation/build scripts and owned temporary resources.
- * POSIX Node20/22 execution is qualified separately; no Windows/TUI claim.
+ * Use the candidate's supported Node runtime; qualification is platform-specific.
+ * This harness makes no Windows or interactive-TUI claim.
  */
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';

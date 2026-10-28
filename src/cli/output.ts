@@ -35,12 +35,14 @@ export function isVerbose(): boolean {
 }
 
 /**
- * Gate for the live-capture TUI: render it only for an interactive, human,
- * non-quiet session. Piped stdout, `--quiet`, or `--consumer agent` all fall
- * back to the line printer. Pure predicate so the resolution is unit-testable.
+ * The legacy dashboard is dormant in 0.4.0 by product scope, not fixed or
+ * qualified. No CLI opt-in is exposed. Keep its original context restrictions
+ * as safeguards if a future, separately reviewed change reintroduces it.
  */
+const LIVE_DASHBOARD_ENABLED = false;
+
 export function shouldUseTui(interactive: boolean, consumer: string, quiet: boolean): boolean {
-  return interactive && consumer === 'human' && !quiet;
+  return LIVE_DASHBOARD_ENABLED && interactive && consumer === 'human' && !quiet;
 }
 
 export function info(msg: string): void {

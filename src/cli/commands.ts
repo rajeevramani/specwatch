@@ -152,7 +152,7 @@ export function createProgram(): Command {
   program
     .name('specwatch')
     .description('Learn API schemas from live traffic and generate OpenAPI specs')
-    .version('0.3.4')
+    .version('0.4.0')
     .option('-v, --verbose', 'Enable verbose output')
     .option('-q, --quiet', 'Suppress non-essential output')
     .hook('preAction', (thisCommand) => {
@@ -249,8 +249,8 @@ export function createProgram(): Command {
         let currentSnapshot = 0;
         let samplesSinceLastSnapshot = 0;
 
-        // Live TUI dashboard: interactive human sessions only. When piped,
-        // quiet, or agent-consumed, fall back to the line printer below.
+        // The legacy dashboard gate is disabled for the supported 0.4.0 CLI.
+        // Retain dormant wiring without exposing a runtime opt-in.
         const useTui = shouldUseTui(isInteractive(), consumer, isQuiet());
         let dashboard: DashboardModel | undefined;
         let dash: DashboardHandle | undefined;

@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-This is local release preparation, not a published `0.3.4` release. The historical package/CLI version string is not a unique candidate identity; qualify an exact source/package checksum. A new release version and Node-support policy remain pending approval. npm's latest published version is `0.3.2`.
+Local candidate `0.4.0` and minimum Node22 are approved for preparation, not publication. Changes remain Unreleased until a separately authorized release. Qualify the exact new source/package checksum rather than relabeling historical `0.3.4` evidence. npm's latest published version remains `0.3.2`.
 
 ### Changed / migration
+
+- **Plain capture is the supported interface, including human TTY sessions.** The earlier local dashboard is dormant, not a supported `0.4.0` feature, and has no CLI opt-in. Its aggregate-then-quit snapshot collision remains a recorded defect, not a fixed/passing path. Use explicit aggregation/export commands and `Ctrl+C` for owned-process shutdown.
+
+- **Minimum runtime is Node.js 22.** Node20 support is dropped to align the package, CI and Ink dependency requirements. Earlier successful Node20 execution is not qualification of the new candidate.
 
 - **Header metadata is structural only.** Captured, stored and exported header entries now contain valid lowercase names and optional closed Bearer/Basic classifications for `authorization`; all raw, masked and empty `example` fields and arbitrary extra fields are removed. Unknown auth schemes retain their header name only. Bearer/Basic and X-API-Key discovery remain supported; forwarded header values are unchanged.
 - **Header export semantics:** shared application-header names remain per-operation optional string parameters, without examples. With metadata enabled, `x-specwatch-global-headers` means presence across operations, not equal header values. Raw JSON header shape and header-name casing intentionally change.
@@ -27,7 +31,7 @@ This is local release preparation, not a published `0.3.4` release. The historic
 
 ### Added
 
-- **Live capture TUI.** On a TTY, `specwatch start <url>` (human sessions) renders a live dashboard: uptime, endpoint/sample counts, and a hit-sorted, color-coded endpoint table — plus a samples-toward-max progress bar when `--max-samples` is set and a snapshot counter when `--auto-aggregate` is on. Piped stdout, `--quiet`, or `--consumer agent` use line-oriented capture output instead of the dashboard. Scroll long endpoint tables with `↑`/`↓` or `j`/`k`; hotkeys: `a` aggregate-now, `e` export the current snapshot to a YAML file, `q` stop & aggregate.
+- A candidate-only standalone `skills/learn-api/SKILL.md`, distributed separately from the npm CLI, and a repeatable source-package rehearsal at `scripts/qualify-candidate.mjs`. Neither is a marketplace listing or tagged-release qualification.
 - **`specwatch investigate --json`.** Emit the redundant-call investigation as a pinned snake_case contract (schema `specwatch.investigation.v1`). Without `--json`, human output is unchanged.
 - **`specwatch agent-report --format json|human`**, plus `--human` and `--pretty` aliases.
 

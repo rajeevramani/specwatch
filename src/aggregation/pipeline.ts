@@ -13,6 +13,7 @@ import type { Sample, InferredSchema, HeaderEntry, AggregatedSchema } from '../t
 import { projectHeaders } from '../headers/metadata.js';
 import type { Database } from '../storage/database.js';
 import { mergeSchemas } from '../inference/merge.js';
+import { isIdentifierLikePathSegment } from '../inference/path-normalizer.js';
 import { calculateSchemaConfidence } from './confidence.js';
 import { detectBreakingChanges } from './diff.js';
 import { SampleRepository } from '../storage/samples.js';
@@ -108,10 +109,11 @@ function pick2xxResponseSchema(entry: EndpointEntry): InferredSchema | undefined
  *      has only 4xx/5xx responses — likely an invalid call to the same
  *      endpoint. Fold the literal into the param sibling.
  *
- *   2. **Parameterize-by-shape-match**: no param sibling exists, but ≥2
- *      literal siblings share the same 2xx response shape (e.g.
- *      /owners/owner_alice and /owners/owner_bob both return Owner). Unify
- *      them under a parameterized path derived from the parent segment.
+ *   2. **Parameterize-recognized-legacy-values**: no param sibling exists,
+ *      and ≥2 literal leaves have capture-recognized ID/value syntax plus
+ *      matching 2xx response shapes. This serves legacy/manual normalized
+ *      rows; fresh captures already normalize recognized values. Alphabetic
+ *      siblings stay literal even when their response shapes match.
  *
  * Modifies `endpointMap` in place. Path normalization at sample-capture time
  * is per-path; unification is the cross-path pass that finishes the job.
@@ -158,12 +160,11 @@ export function unifyEndpointPaths(endpointMap: Map<string, EndpointEntry>): voi
       continue;
     }
 
-    // Case 2: no param sibling — partition literal members by 2xx response
-    // fingerprint. Members in the same partition share a response shape and
-    // should unify under a parameterized path.
+    // Case 2: only recognized legacy/manual literal values can be candidates.
+    // Response shape alone cannot distinguish resource names from identifiers.
     const literalMembers = members.filter(({ entry }) => {
       const last = entry.path.split('/').pop()!;
-      return !(last.startsWith('{') && last.endsWith('}'));
+      return isIdentifierLikePathSegment(last);
     });
     if (literalMembers.length < 2) continue;
 

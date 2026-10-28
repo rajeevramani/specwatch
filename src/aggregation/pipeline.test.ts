@@ -900,7 +900,8 @@ describe('unifyEndpointPaths', () => {
     };
   }
 
-  it('unifies sibling literal paths sharing a 2xx response shape', () => {
+  // Intentional finding8 policy correction: body shape alone does not prove an ID.
+  it('preserves ambiguous alphabetic siblings even when their 2xx response shape matches', () => {
     const ownerShape = makeObjectSchema({ id: makeStringSchema(), name: makeStringSchema() });
     const map = new Map<string, ReturnType<typeof makeEntry>>();
     map.set('GET /owners/owner_alice', makeEntry('GET', '/owners/owner_alice', { '200': { responseSchema: ownerShape } }));
@@ -908,9 +909,9 @@ describe('unifyEndpointPaths', () => {
 
     unifyEndpointPaths(map);
 
-    expect(map.has('GET /owners/owner_alice')).toBe(false);
-    expect(map.has('GET /owners/owner_bob')).toBe(false);
-    expect(map.has('GET /owners/{ownerId}')).toBe(true);
+    expect(map.has('GET /owners/owner_alice')).toBe(true);
+    expect(map.has('GET /owners/owner_bob')).toBe(true);
+    expect(map.has('GET /owners/{ownerId}')).toBe(false);
   });
 
   it('does not unify siblings with different 2xx shapes', () => {

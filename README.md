@@ -66,7 +66,7 @@ Human sessions use plain, line-oriented output even on an interactive terminal. 
 
 ### What inference captures
 
-- Observed paths/methods and inferred path parameters.
+- Observed paths/methods and inferred path parameters. Numeric, UUID and recognized digit-bearing values retain contextual normalization; uncertain alphabetic paths such as `/owners/owner_alice` remain literal. Matching response shapes alone do not justify combining static resources such as `/config/theme` and `/config/language`.
 - JSON body types, nested objects/arrays, formats and union shapes.
 - Required fields based on observed presence; PATCH request fields are not marked required.
 - Low-cardinality string enums, subject to sample and field/value heuristics.

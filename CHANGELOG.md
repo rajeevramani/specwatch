@@ -5,17 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.4] - 2026-07-09
+## [Unreleased]
 
-### Breaking (agent CLI)
+This is local release preparation, not a published `0.3.4` release. The historical package/CLI version string is not a unique candidate identity; qualify an exact source/package checksum. A new release version and Node-support policy remain pending approval. npm's latest published version is `0.3.2`.
+
+### Changed / migration
+
+- **Header metadata is structural only.** Captured, stored and exported header entries now contain valid lowercase names and optional closed Bearer/Basic classifications for `authorization`; all raw, masked and empty `example` fields and arbitrary extra fields are removed. Unknown auth schemes retain their header name only. Bearer/Basic and X-API-Key discovery remain supported; forwarded header values are unchanged.
+- **Header export semantics:** shared application-header names remain per-operation optional string parameters, without examples. With metadata enabled, `x-specwatch-global-headers` means presence across operations, not equal header values. Raw JSON header shape and header-name casing intentionally change.
+- **Forward-only database migration v4** logically cleans the four header JSON columns in samples/aggregated schemas, preserving nonheader records and snapshots. Old binaries reject a v4 store. Invalid legacy header JSON aborts/rolls back the v4 step with a fixed value-free error; the failed-open handle closes. For recovery, use a different empty `SPECWATCH_HOME` and private maintainer assistance, not printed raw JSON, forced schema versions or the old capture binary.
+- **Logical cleanup is not secure erasure:** historic values may survive WAL/free pages, snapshots, backups and existing exports, which are not automatically erased. The strict header guarantee applies to new retained/exported metadata, not all path/query/schema values or caller-owned historical files.
+
+### Fixed
+
+- Response-header capture observes explicit object/status-message/raw-array `writeHead` arguments as well as implicit `setHeader` paths, without changing native forwarding, override/duplicate behavior or original protocol errors. Projection failure cannot prevent the original response.
+- Seven TypeScript errors corrected; `typecheck` is now mandatory in CI, and tests build the CLI first so subprocess tests run current code.
+
+### Changed (breaking agent CLI)
 
 - **`specwatch agent-report` now emits machine-readable AgentEvidence JSON on stdout by default** for `--consumer agent` sessions (schema `specwatch.agent_evidence.v1`). It previously printed human-readable tables to stdout. Use `--human` (or `--format human`, or `--pretty`) to restore the tables. `-o <file>` is unchanged (still writes the evidence JSON to a file); with `-o` and no `--human`, stdout also stays JSON. Any script that parsed the old table output from stdout must switch to `--human` or consume the JSON. No deprecation window — the agent surface is young (introduced in the 0.3.x line) and carried no stable-contract promise.
 
 ### Added
 
-- **Live capture TUI.** On a TTY, `specwatch start <url>` (human sessions) renders a live dashboard: uptime, endpoint/sample counts, and a hit-sorted, color-coded endpoint table — plus a samples-toward-max progress bar when `--max-samples` is set and a snapshot counter when `--auto-aggregate` is on. Piped stdout, `--quiet`, or `--consumer agent` fall back to the previous line printer (aggregation summary byte-identical). Scroll long endpoint tables with `↑`/`↓` or `j`/`k`; hotkeys: `a` aggregate-now, `e` export the current snapshot to a YAML file, `q` stop & aggregate.
+- **Live capture TUI.** On a TTY, `specwatch start <url>` (human sessions) renders a live dashboard: uptime, endpoint/sample counts, and a hit-sorted, color-coded endpoint table — plus a samples-toward-max progress bar when `--max-samples` is set and a snapshot counter when `--auto-aggregate` is on. Piped stdout, `--quiet`, or `--consumer agent` use line-oriented capture output instead of the dashboard. Scroll long endpoint tables with `↑`/`↓` or `j`/`k`; hotkeys: `a` aggregate-now, `e` export the current snapshot to a YAML file, `q` stop & aggregate.
 - **`specwatch investigate --json`.** Emit the redundant-call investigation as a pinned snake_case contract (schema `specwatch.investigation.v1`). Without `--json`, human output is unchanged.
 - **`specwatch agent-report --format json|human`**, plus `--human` and `--pretty` aliases.
+
+## [0.3.2] - 2026-03-29
+
+Published to npm and recorded in the GitHub v0.3.2 release on this UTC date. The release includes the v0.3.x development history below; repository tags `v0.3.0` and `v0.3.1` identify milestones, but the npm version history does not show separate publications of those versions. No npm `0.3.3` or `0.3.4` release is implied.
+
+### Added (v0.3.x)
+
+- Agent-consumer sessions and REST/MCP/JSON-RPC analysis: agent reports, redundant-call investigations, session phases and optional LLM explanations.
+- Shared domain-model discovery, wired into CLI OpenAPI export, to reuse named schemas across endpoints. This does not assert that every nested-model/nullability boundary is correct.
+
+### Fixed
+
+- Investigation recommendations use per-pair causes instead of repeating only the primary cause.
+
+History sources: [GitHub release v0.3.2](https://github.com/rajeevramani/specwatch/releases/tag/v0.3.2), repository milestones `102012f` (agent/MCP support), `39ba1c8` (CLI domain-model wiring), `0e3c449` (per-pair recommendation fix), and the npm publication record.
 
 ## [0.2.0] - 2026-03-15
 

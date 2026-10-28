@@ -138,6 +138,14 @@ function parseQueryParams(url: string): Record<string, string> | undefined {
   return Object.keys(params).length > 0 ? params : undefined;
 }
 
+interface StartOptions {
+  port: string;
+  name?: string;
+  maxSamples?: string;
+  consumer: string;
+  autoAggregate?: boolean;
+}
+
 export function createProgram(): Command {
   const program = new Command();
 
@@ -163,7 +171,7 @@ export function createProgram(): Command {
     .option('--max-samples <count>', 'Maximum samples to capture')
     .option('--auto-aggregate', 'Auto-aggregate every --max-samples and continue capturing')
     .option('--consumer <type>', 'Consumer type: human or agent', 'human')
-    .action(async (url: string, opts: Record<string, string>) => {
+    .action(async (url: string, opts: StartOptions) => {
       try {
         const port = parseInt(opts['port'], 10);
         if (isNaN(port) || port < 1 || port > 65535) {
@@ -178,7 +186,7 @@ export function createProgram(): Command {
             'Use --consumer human or --consumer agent.',
           );
         }
-        const autoAggregate = opts['autoAggregate'] === true || opts['autoAggregate'] === '';
+        const autoAggregate = opts['autoAggregate'] === true;
         if (autoAggregate && maxSamples === undefined) {
           throw new SpecwatchError(
             '--auto-aggregate requires --max-samples.',

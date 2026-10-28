@@ -548,13 +548,13 @@ describe('Transport header filtering', () => {
       httpMethod: 'GET',
       path: '/users',
       requestHeaders: [
-        { name: 'Accept', example: 'application/json' },
-        { name: 'Accept-Encoding', example: 'gzip' },
-        { name: 'User-Agent', example: 'Mozilla/5.0' },
-        { name: 'Content-Length', example: '42' },
-        { name: 'Content-Type', example: 'application/json' },
-        { name: 'Host', example: 'api.example.com' },
-        { name: 'X-Custom-Header', example: 'custom-value' },
+        { name: 'Accept' },
+        { name: 'Accept-Encoding' },
+        { name: 'User-Agent' },
+        { name: 'Content-Length' },
+        { name: 'Content-Type' },
+        { name: 'Host' },
+        { name: 'X-Custom-Header' },
       ],
       responseSchemas: { '200': USER_RESPONSE_SCHEMA },
     });
@@ -568,15 +568,15 @@ describe('Transport header filtering', () => {
     const headerNames = headerParams.map((p) => p['name']);
 
     // Transport headers must be excluded
-    expect(headerNames).not.toContain('Accept');
-    expect(headerNames).not.toContain('Accept-Encoding');
-    expect(headerNames).not.toContain('User-Agent');
-    expect(headerNames).not.toContain('Content-Length');
-    expect(headerNames).not.toContain('Content-Type');
-    expect(headerNames).not.toContain('Host');
+    expect(headerNames).not.toContain('accept');
+    expect(headerNames).not.toContain('accept-encoding');
+    expect(headerNames).not.toContain('user-agent');
+    expect(headerNames).not.toContain('content-length');
+    expect(headerNames).not.toContain('content-type');
+    expect(headerNames).not.toContain('host');
 
     // Custom header should still pass through
-    expect(headerNames).toContain('X-Custom-Header');
+    expect(headerNames).toContain('x-custom-header');
   });
 
   it('transport header filtering is case-insensitive', () => {
@@ -584,10 +584,10 @@ describe('Transport header filtering', () => {
       httpMethod: 'GET',
       path: '/users',
       requestHeaders: [
-        { name: 'ACCEPT', example: 'application/json' },
-        { name: 'content-type', example: 'application/json' },
-        { name: 'user-AGENT', example: 'test' },
-        { name: 'X-Request-Id', example: '123' },
+        { name: 'ACCEPT' },
+        { name: 'content-type' },
+        { name: 'user-AGENT' },
+        { name: 'X-Request-Id' },
       ],
       responseSchemas: { '200': USER_RESPONSE_SCHEMA },
     });
@@ -600,10 +600,10 @@ describe('Transport header filtering', () => {
     const headerParams = parameters.filter((p) => p['in'] === 'header');
     const headerNames = headerParams.map((p) => p['name']);
 
-    expect(headerNames).not.toContain('ACCEPT');
+    expect(headerNames).not.toContain('accept');
     expect(headerNames).not.toContain('content-type');
-    expect(headerNames).not.toContain('user-AGENT');
-    expect(headerNames).toContain('X-Request-Id');
+    expect(headerNames).not.toContain('user-agent');
+    expect(headerNames).toContain('x-request-id');
   });
 
   it('custom headers pass through when no transport/auth headers present', () => {
@@ -611,8 +611,8 @@ describe('Transport header filtering', () => {
       httpMethod: 'GET',
       path: '/items',
       requestHeaders: [
-        { name: 'X-Request-Id', example: 'abc-123' },
-        { name: 'X-Correlation-Id', example: 'xyz-789' },
+        { name: 'X-Request-Id' },
+        { name: 'X-Correlation-Id' },
       ],
       responseSchemas: { '200': USER_RESPONSE_SCHEMA },
     });
@@ -624,8 +624,7 @@ describe('Transport header filtering', () => {
 
     const headerParams = parameters.filter((p) => p['in'] === 'header');
     expect(headerParams).toHaveLength(2);
-    expect(headerParams[0]['name']).toBe('X-Request-Id');
-    expect(headerParams[1]['name']).toBe('X-Correlation-Id');
+    expect(headerParams.map((parameter) => parameter['name'])).toEqual(['x-correlation-id', 'x-request-id']);
   });
 });
 
@@ -640,7 +639,7 @@ describe('Security schemes detection', () => {
         httpMethod: 'GET',
         path: '/users',
         requestHeaders: [
-          { name: 'Authorization', example: 'Bearer eyJhbGciOiJIUzI1NiJ9...' },
+          { name: 'Authorization', authSchemes: ['bearer'] },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),
@@ -658,7 +657,7 @@ describe('Security schemes detection', () => {
         httpMethod: 'GET',
         path: '/users',
         requestHeaders: [
-          { name: 'Authorization', example: 'Basic dXNlcjpwYXNz' },
+          { name: 'Authorization', authSchemes: ['basic'] },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),
@@ -676,7 +675,7 @@ describe('Security schemes detection', () => {
         httpMethod: 'GET',
         path: '/users',
         requestHeaders: [
-          { name: 'X-API-Key', example: 'sk-abc123' },
+          { name: 'X-API-Key' },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),
@@ -698,7 +697,7 @@ describe('Security schemes detection', () => {
         httpMethod: 'GET',
         path: '/users',
         requestHeaders: [
-          { name: 'Authorization', example: 'Bearer token123' },
+          { name: 'Authorization', authSchemes: ['bearer'] },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),
@@ -707,7 +706,7 @@ describe('Security schemes detection', () => {
         httpMethod: 'GET',
         path: '/admin',
         requestHeaders: [
-          { name: 'X-API-Key', example: 'key-456' },
+          { name: 'X-API-Key' },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),
@@ -727,7 +726,7 @@ describe('Security schemes detection', () => {
         httpMethod: 'GET',
         path: '/public',
         requestHeaders: [
-          { name: 'X-Request-Id', example: '123' },
+          { name: 'X-Request-Id' },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),
@@ -743,7 +742,7 @@ describe('Security schemes detection', () => {
         httpMethod: 'GET',
         path: '/users',
         requestHeaders: [
-          { name: 'Authorization', example: 'Bearer token' },
+          { name: 'Authorization', authSchemes: ['bearer'] },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),
@@ -762,8 +761,8 @@ describe('Security schemes detection', () => {
         httpMethod: 'GET',
         path: '/users',
         requestHeaders: [
-          { name: 'Authorization', example: 'Bearer token' },
-          { name: 'X-API-Key', example: 'key123' },
+          { name: 'Authorization', authSchemes: ['bearer'] },
+          { name: 'X-API-Key' },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),

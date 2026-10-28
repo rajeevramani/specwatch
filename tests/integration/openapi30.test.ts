@@ -298,7 +298,7 @@ describe('OpenAPI 3.0 conversion', () => {
         httpMethod: 'GET',
         path: '/users',
         requestHeaders: [
-          { name: 'Authorization', example: 'Bearer token123' },
+          { name: 'Authorization', authSchemes: ['bearer'] },
         ],
         responseSchemas: { '200': USER_RESPONSE_SCHEMA },
       }),

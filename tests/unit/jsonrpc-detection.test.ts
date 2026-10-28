@@ -283,12 +283,12 @@ describe('v3 migration — jsonrpc columns', () => {
     expect(columnNames).toContain('jsonrpc_tool');
   });
 
-  it('schema version is 3 after full migration', () => {
+  it('full migration includes the v4 privacy upgrade', () => {
     expect(getSchemaVersion(db)).toBe(MIGRATIONS.length);
-    expect(getSchemaVersion(db)).toBe(3);
+    expect(getSchemaVersion(db)).toBe(4);
   });
 
-  it('v2 database upgrades to v3 correctly', () => {
+  it('v2 database upgrades through v3 JSON-RPC columns to v4', () => {
     // Create a fresh in-memory db, apply only v1+v2
     const testDb = new Database(':memory:');
     MIGRATIONS[0].up(testDb);
@@ -297,7 +297,7 @@ describe('v3 migration — jsonrpc columns', () => {
 
     // Apply remaining migrations
     applyMigrations(testDb);
-    expect(getSchemaVersion(testDb)).toBe(3);
+    expect(getSchemaVersion(testDb)).toBe(4);
 
     const info = testDb.prepare('PRAGMA table_info(samples)').all() as Array<{ name: string }>;
     const columnNames = info.map((c) => c.name);

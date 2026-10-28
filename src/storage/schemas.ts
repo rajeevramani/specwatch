@@ -3,10 +3,10 @@
  * JSON fields are serialized at the repository boundary; callers receive typed objects.
  */
 import type Database from 'better-sqlite3';
+import { decodeHeaders, encodeHeaders } from '../headers/metadata.js';
 import type {
   AggregatedSchema,
   InferredSchema,
-  HeaderEntry,
   BreakingChange,
 } from '../types/index.js';
 
@@ -55,12 +55,8 @@ function rowToAggregatedSchema(row: AggregatedSchemaRow): AggregatedSchema {
     responseSchemas: row.response_schemas
       ? (JSON.parse(row.response_schemas) as Record<string, InferredSchema | null>)
       : undefined,
-    requestHeaders: row.request_headers
-      ? (JSON.parse(row.request_headers) as HeaderEntry[])
-      : undefined,
-    responseHeaders: row.response_headers
-      ? (JSON.parse(row.response_headers) as HeaderEntry[])
-      : undefined,
+    requestHeaders: decodeHeaders(row.request_headers),
+    responseHeaders: decodeHeaders(row.response_headers),
     queryParams: row.query_params
       ? (JSON.parse(row.query_params) as Record<string, string[]>)
       : undefined,
@@ -119,8 +115,8 @@ export class AggregatedSchemaRepository {
         schema.snapshot ?? 1,
         schema.requestSchema != null ? JSON.stringify(schema.requestSchema) : null,
         schema.responseSchemas != null ? JSON.stringify(schema.responseSchemas) : null,
-        schema.requestHeaders != null ? JSON.stringify(schema.requestHeaders) : null,
-        schema.responseHeaders != null ? JSON.stringify(schema.responseHeaders) : null,
+        encodeHeaders(schema.requestHeaders),
+        encodeHeaders(schema.responseHeaders),
         schema.queryParams != null ? JSON.stringify(schema.queryParams) : null,
         schema.pathParamValues != null ? JSON.stringify(schema.pathParamValues) : null,
         schema.sampleCount,

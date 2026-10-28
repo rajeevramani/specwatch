@@ -378,71 +378,70 @@ describe('mergeHeaders', () => {
 
   it('returns headers from single array', () => {
     const headers: HeaderEntry[] = [
-      { name: 'Content-Type', example: 'application/json' },
+      { name: 'Content-Type' },
     ];
     const result = mergeHeaders([headers]);
     expect(result).toHaveLength(1);
-    expect(result![0].name).toBe('Content-Type');
+    expect(result![0].name).toBe('content-type');
   });
 
   it('deduplicates headers by name (case-insensitive)', () => {
-    const h1: HeaderEntry[] = [{ name: 'Content-Type', example: 'application/json' }];
-    const h2: HeaderEntry[] = [{ name: 'content-type', example: 'text/plain' }];
+    const h1: HeaderEntry[] = [{ name: 'Content-Type' }];
+    const h2: HeaderEntry[] = [{ name: 'content-type' }];
 
     const result = mergeHeaders([h1, h2]);
     expect(result).toHaveLength(1);
-    // Keeps the first value seen
-    expect(result![0].example).toBe('application/json');
+    expect(result).toEqual([{ name: 'content-type' }]);
   });
 
-  it('keeps example value from first occurrence', () => {
-    const h1: HeaderEntry[] = [{ name: 'X-Request-ID', example: 'abc-123' }];
-    const h2: HeaderEntry[] = [{ name: 'X-Request-ID', example: 'def-456' }];
+  it('deduplicates structural presence without examples', () => {
+    const h1: HeaderEntry[] = [{ name: 'X-Request-ID' }];
+    const h2: HeaderEntry[] = [{ name: 'X-Request-ID' }];
 
     const result = mergeHeaders([h1, h2]);
-    expect(result![0].example).toBe('abc-123');
+    expect(result).toEqual([{ name: 'x-request-id' }]);
   });
 
   it('sorts headers alphabetically by name', () => {
     const h1: HeaderEntry[] = [
-      { name: 'Z-Header', example: 'z' },
-      { name: 'A-Header', example: 'a' },
-      { name: 'M-Header', example: 'm' },
+      { name: 'Z-Header' },
+      { name: 'A-Header' },
+      { name: 'M-Header' },
     ];
 
     const result = mergeHeaders([h1]);
-    expect(result![0].name).toBe('A-Header');
-    expect(result![1].name).toBe('M-Header');
-    expect(result![2].name).toBe('Z-Header');
+    expect(result![0].name).toBe('a-header');
+    expect(result![1].name).toBe('m-header');
+    expect(result![2].name).toBe('z-header');
   });
 
   it('merges headers from multiple samples', () => {
     const h1: HeaderEntry[] = [
-      { name: 'Content-Type', example: 'application/json' },
-      { name: 'Accept', example: 'application/json' },
+      { name: 'Content-Type' },
+      { name: 'Accept' },
     ];
     const h2: HeaderEntry[] = [
-      { name: 'Content-Type', example: 'application/json' },
-      { name: 'X-Request-ID', example: 'abc-123' },
+      { name: 'Content-Type' },
+      { name: 'X-Request-ID' },
     ];
     const h3: HeaderEntry[] = [
-      { name: 'Authorization', example: 'Bearer ***' },
+      { name: 'Authorization', authSchemes: ['bearer'] },
     ];
 
     const result = mergeHeaders([h1, h2, h3]);
     expect(result).toHaveLength(4);
     const names = result!.map((h) => h.name);
-    expect(names).toContain('Accept');
-    expect(names).toContain('Authorization');
-    expect(names).toContain('Content-Type');
-    expect(names).toContain('X-Request-ID');
+    expect(names).toContain('accept');
+    expect(names).toContain('authorization');
+    expect(names).toContain('content-type');
+    expect(names).toContain('x-request-id');
   });
 
   it('handles mix of undefined and real arrays', () => {
-    const headers: HeaderEntry[] = [{ name: 'X-Custom', example: 'value' }];
+    const headers: HeaderEntry[] = [{ name: 'X-Custom' }];
     const result = mergeHeaders([undefined, headers, undefined]);
     expect(result).toHaveLength(1);
-    expect(result![0].name).toBe('X-Custom');
+    expect(result![0].name).toBe('x-custom');
   });
 
   it('returns undefined for arrays with no headers (empty arrays)', () => {

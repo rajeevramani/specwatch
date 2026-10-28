@@ -451,9 +451,9 @@ describe('buildOperationObject', () => {
   it('includes header parameters from requestHeaders (excluding auth and transport headers)', () => {
     const schema = makeAggregatedSchema({
       requestHeaders: [
-        { name: 'X-Request-ID', example: 'abc-123' },
-        { name: 'Authorization', example: 'Bearer ***' },
-        { name: 'Content-Type', example: 'application/json' },
+        { name: 'X-Request-ID' },
+        { name: 'Authorization', authSchemes: ['bearer'] },
+        { name: 'Content-Type' },
       ],
     });
     const op = buildOperationObject(schema);
@@ -461,75 +461,75 @@ describe('buildOperationObject', () => {
     expect(params).toBeDefined();
     // Should have X-Request-ID, but NOT Authorization (auth) or Content-Type (transport)
     const names = params.map((p) => p['name']);
-    expect(names).toContain('X-Request-ID');
-    expect(names).not.toContain('Content-Type');
-    expect(names).not.toContain('Authorization');
+    expect(names).toContain('x-request-id');
+    expect(names).not.toContain('content-type');
+    expect(names).not.toContain('authorization');
   });
 
   it('excludes x-api-key from header parameters', () => {
     const schema = makeAggregatedSchema({
       requestHeaders: [
-        { name: 'X-API-Key', example: '***' },
-        { name: 'X-Custom-Header', example: 'value' },
+        { name: 'X-API-Key' },
+        { name: 'X-Custom-Header' },
       ],
     });
     const op = buildOperationObject(schema);
     const params = op['parameters'] as Array<Record<string, unknown>>;
     const names = params.map((p) => p['name']);
-    expect(names).not.toContain('X-API-Key');
-    expect(names).toContain('X-Custom-Header');
+    expect(names).not.toContain('x-api-key');
+    expect(names).toContain('x-custom-header');
   });
 
   it('excludes transport headers (accept, user-agent, content-type, content-length, accept-encoding, host)', () => {
     const schema = makeAggregatedSchema({
       requestHeaders: [
-        { name: 'accept', example: 'application/json' },
-        { name: 'user-agent', example: 'curl/7.88' },
-        { name: 'content-type', example: 'application/json' },
-        { name: 'content-length', example: '42' },
-        { name: 'accept-encoding', example: 'gzip, deflate' },
-        { name: 'host', example: 'api.example.com' },
-        { name: 'X-Custom-Header', example: 'keep-me' },
+        { name: 'accept' },
+        { name: 'user-agent' },
+        { name: 'content-type' },
+        { name: 'content-length' },
+        { name: 'accept-encoding' },
+        { name: 'host' },
+        { name: 'X-Custom-Header' },
       ],
     });
     const op = buildOperationObject(schema);
     const params = op['parameters'] as Array<Record<string, unknown>>;
     const names = params.map((p) => p['name']);
-    expect(names).toEqual(['X-Custom-Header']);
+    expect(names).toEqual(['x-custom-header']);
   });
 
   it('excludes transport headers case-insensitively', () => {
     const schema = makeAggregatedSchema({
       requestHeaders: [
-        { name: 'Accept', example: 'application/json' },
-        { name: 'USER-AGENT', example: 'curl/7.88' },
-        { name: 'Content-Type', example: 'application/json' },
-        { name: 'Host', example: 'api.example.com' },
-        { name: 'X-Trace-ID', example: 'trace-456' },
+        { name: 'Accept' },
+        { name: 'USER-AGENT' },
+        { name: 'Content-Type' },
+        { name: 'Host' },
+        { name: 'X-Trace-ID' },
       ],
     });
     const op = buildOperationObject(schema);
     const params = op['parameters'] as Array<Record<string, unknown>>;
     const names = params.map((p) => p['name']);
-    expect(names).toContain('X-Trace-ID');
-    expect(names).not.toContain('Accept');
-    expect(names).not.toContain('USER-AGENT');
-    expect(names).not.toContain('Content-Type');
-    expect(names).not.toContain('Host');
+    expect(names).toContain('x-trace-id');
+    expect(names).not.toContain('accept');
+    expect(names).not.toContain('user-agent');
+    expect(names).not.toContain('content-type');
+    expect(names).not.toContain('host');
   });
 
   it('includes non-transport, non-auth custom headers', () => {
     const schema = makeAggregatedSchema({
       requestHeaders: [
-        { name: 'X-Request-ID', example: 'abc-123' },
-        { name: 'X-Correlation-ID', example: 'corr-456' },
-        { name: 'X-Tenant-ID', example: 'tenant-789' },
+        { name: 'X-Request-ID' },
+        { name: 'X-Correlation-ID' },
+        { name: 'X-Tenant-ID' },
       ],
     });
     const op = buildOperationObject(schema);
     const params = op['parameters'] as Array<Record<string, unknown>>;
     const names = params.map((p) => p['name']);
-    expect(names).toEqual(['X-Request-ID', 'X-Correlation-ID', 'X-Tenant-ID']);
+    expect(names).toEqual(['x-correlation-id', 'x-request-id', 'x-tenant-id']);
   });
 });
 
@@ -748,7 +748,7 @@ describe('detectSecuritySchemes', () => {
   it('detects Bearer auth from Authorization header', () => {
     const schemas = [
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'Authorization', example: 'Bearer ***' }],
+        requestHeaders: [{ name: 'Authorization', authSchemes: ['bearer'] }],
       }),
     ];
     const result = detectSecuritySchemes(schemas);
@@ -760,7 +760,7 @@ describe('detectSecuritySchemes', () => {
   it('detects Basic auth from Authorization header', () => {
     const schemas = [
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'Authorization', example: 'Basic dXNlcjpwYXNz' }],
+        requestHeaders: [{ name: 'Authorization', authSchemes: ['basic'] }],
       }),
     ];
     const result = detectSecuritySchemes(schemas);
@@ -772,7 +772,7 @@ describe('detectSecuritySchemes', () => {
   it('detects X-API-Key header as apiKey security scheme', () => {
     const schemas = [
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'X-API-Key', example: '***' }],
+        requestHeaders: [{ name: 'X-API-Key' }],
       }),
     ];
     const result = detectSecuritySchemes(schemas);
@@ -788,11 +788,11 @@ describe('detectSecuritySchemes', () => {
   it('detects multiple auth types across schemas', () => {
     const schemas = [
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'Authorization', example: 'Bearer ***' }],
+        requestHeaders: [{ name: 'Authorization', authSchemes: ['bearer'] }],
         path: '/users',
       }),
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'X-API-Key', example: '***' }],
+        requestHeaders: [{ name: 'X-API-Key' }],
         path: '/orders',
       }),
     ];
@@ -807,7 +807,7 @@ describe('detectSecuritySchemes', () => {
   it('returns undefined when no auth headers present', () => {
     const schemas = [
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'X-Request-ID', example: 'abc-123' }],
+        requestHeaders: [{ name: 'X-Request-ID' }],
       }),
     ];
     const result = detectSecuritySchemes(schemas);
@@ -823,11 +823,11 @@ describe('detectSecuritySchemes', () => {
   it('does not duplicate schemes when same auth appears on multiple endpoints', () => {
     const schemas = [
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'Authorization', example: 'Bearer ***' }],
+        requestHeaders: [{ name: 'Authorization', authSchemes: ['bearer'] }],
         path: '/users',
       }),
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'Authorization', example: 'Bearer ***' }],
+        requestHeaders: [{ name: 'Authorization', authSchemes: ['bearer'] }],
         path: '/orders',
       }),
     ];
@@ -846,7 +846,7 @@ describe('buildOpenApiDocument securitySchemes', () => {
   it('includes securitySchemes in components when Bearer auth detected', () => {
     const schemas = [
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'Authorization', example: 'Bearer ***' }],
+        requestHeaders: [{ name: 'Authorization', authSchemes: ['bearer'] }],
       }),
     ];
     const doc = buildOpenApiDocument(schemas);
@@ -859,7 +859,7 @@ describe('buildOpenApiDocument securitySchemes', () => {
   it('includes top-level security array when auth detected', () => {
     const schemas = [
       makeAggregatedSchema({
-        requestHeaders: [{ name: 'Authorization', example: 'Bearer ***' }],
+        requestHeaders: [{ name: 'Authorization', authSchemes: ['bearer'] }],
       }),
     ];
     const doc = buildOpenApiDocument(schemas);
@@ -898,8 +898,8 @@ describe('buildOpenApiDocument securitySchemes', () => {
     const schemas = [
       makeAggregatedSchema({
         requestHeaders: [
-          { name: 'Authorization', example: 'Bearer ***' },
-          { name: 'X-API-Key', example: '***' },
+          { name: 'Authorization', authSchemes: ['bearer'] },
+          { name: 'X-API-Key' },
         ],
       }),
     ];

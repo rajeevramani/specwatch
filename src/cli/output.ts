@@ -378,7 +378,7 @@ export function formatAgentReport(
     const redundantTable = new Table({
       head: redundantHead,
       style: { head: ['cyan'] },
-      ...(hasInvestigation ? { wordWrap: true, colWidths: [undefined, 8, 10, 8, 46] } : {}),
+      ...(hasInvestigation ? { wordWrap: true, colWidths: [null, 8, 10, 8, 46] } : {}),
     });
     for (const r of sequenceAnalysis.redundantCalls) {
       const extra = r.count - r.expectedCount;

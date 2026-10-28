@@ -395,10 +395,12 @@ describe('captureRequestResponse — request headers', () => {
       },
       { body: '{}', contentType: 'application/json' },
     );
-    const map = Object.fromEntries(pair.requestHeaders!.map((h) => [h.name, h.example]));
-    expect(map['authorization']).toBe('Bearer ***');
-    expect(map['x-request-id']).toBe('req-123');
-    expect(map['connection']).toBeUndefined();
+    expect(pair.requestHeaders).toEqual([
+      { name: 'authorization', authSchemes: ['bearer'] },
+      { name: 'content-type' }, { name: 'x-request-id' },
+    ]);
+    expect(JSON.stringify(pair)).not.toContain('mytoken');
+    expect(JSON.stringify(pair)).not.toContain('req-123');
   });
 
   it('returns undefined requestHeaders when no capturable headers', async () => {

@@ -11,6 +11,7 @@
 
 import yaml from 'js-yaml';
 import type { InferredSchema, AggregatedSchema, ExportOptions, HeaderEntry } from '../types/index.js';
+import { projectHeaders } from '../headers/metadata.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
 import type { DomainModelRegistry } from './domain-models.js';
 
@@ -287,54 +288,13 @@ export function convertSchemaToOpenApi(
 // Header Deduplication
 // ============================================================
 
-/**
- * Extract headers that appear in ALL schemas with identical values.
- * These are "global" headers that can be factored out of individual operations.
- *
- * Only considers headers that pass the auth/transport filter (i.e., headers
- * that would actually appear in the OpenAPI output).
- *
- * @param schemas - Aggregated schemas to analyze
- * @returns Headers present in every schema with the same name and example value
- */
+/** Names present in every operation; presence metadata, never value equality. */
 export function extractGlobalHeaders(schemas: AggregatedSchema[]): HeaderEntry[] {
   if (schemas.length <= 1) return [];
-
-  // Build a Set<"lowername:example"> per schema for O(1) membership checks
-  const perSchemaKeySets: Set<string>[] = [];
-  for (const s of schemas) {
-    const headers = s.requestHeaders ?? [];
-    const keySet = new Set<string>();
-    for (const h of headers) {
-      const lower = h.name.toLowerCase();
-      if (!AUTH_HEADERS.has(lower) && !TRANSPORT_HEADERS.has(lower)) {
-        keySet.add(`${lower}:${h.example}`);
-      }
-    }
-    // If any schema has no filtered headers, no globals possible
-    if (keySet.size === 0) return [];
-    perSchemaKeySets.push(keySet);
-  }
-
-  // Use first schema's filtered headers as candidates, check membership in all others
-  const firstHeaders = (schemas[0].requestHeaders ?? []).filter((h) => {
-    const lower = h.name.toLowerCase();
-    return !AUTH_HEADERS.has(lower) && !TRANSPORT_HEADERS.has(lower);
-  });
-
-  const globals: HeaderEntry[] = [];
-  const seen = new Set<string>();
-
-  for (const candidate of firstHeaders) {
-    const key = `${candidate.name.toLowerCase()}:${candidate.example}`;
-    if (seen.has(key)) continue;
-    if (perSchemaKeySets.every((keySet) => keySet.has(key))) {
-      globals.push({ name: candidate.name, example: candidate.example });
-      seen.add(key);
-    }
-  }
-
-  return globals;
+  const perSchema = schemas.map((schema) => (projectHeaders(schema.requestHeaders) ?? [])
+    .filter((header) => !AUTH_HEADERS.has(header.name) && !TRANSPORT_HEADERS.has(header.name)));
+  const names = perSchema.map((headers) => new Set(headers.map((header) => header.name)));
+  return perSchema[0].filter((header) => names.every((set) => set.has(header.name)));
 }
 
 // ============================================================
@@ -493,7 +453,7 @@ export function buildOperationObject(
     }
   }
 
-  // Header parameters (excluding auth, transport, and global headers)
+  // Preserve operation headers even when also listed in global metadata.
   if (schema.requestHeaders !== undefined) {
     const headerParams = buildHeaderParameters(schema.requestHeaders, globalHeaders);
     parameters.push(...headerParams);
@@ -655,19 +615,18 @@ function buildResponseObject(
  */
 function buildHeaderParameters(
   headers: HeaderEntry[],
-  globalHeaders: Set<string> = new Set(),
+  _globalHeaders: Set<string> = new Set(),
 ): Array<Record<string, unknown>> {
-  return headers
+  return (projectHeaders(headers) ?? [])
     .filter((h) => {
       const lower = h.name.toLowerCase();
-      return !AUTH_HEADERS.has(lower) && !TRANSPORT_HEADERS.has(lower) && !globalHeaders.has(lower);
+      return !AUTH_HEADERS.has(lower) && !TRANSPORT_HEADERS.has(lower);
     })
     .map((h) => ({
       name: h.name,
       in: 'header',
       required: false,
       schema: { type: 'string' },
-      example: h.example,
     }));
 }
 
@@ -746,8 +705,8 @@ export function addMetadataExtensions(
  * Detect security schemes from auth-related headers across all aggregated schemas.
  *
  * Scans requestHeaders for:
- * - Authorization: Bearer *** → bearerAuth (type: http, scheme: bearer)
- * - Authorization: Basic *** → basicAuth (type: http, scheme: basic)
+ * - authorization authSchemes: bearer → bearerAuth (type: http, scheme: bearer)
+ * - authorization authSchemes: basic → basicAuth (type: http, scheme: basic)
  * - X-API-Key → apiKeyAuth (type: apiKey, in: header, name: X-API-Key)
  *
  * @param schemas - Aggregated schemas to scan for auth headers
@@ -766,16 +725,16 @@ export function detectSecuritySchemes(
   for (const schema of schemas) {
     if (schema.requestHeaders === undefined) continue;
 
-    for (const header of schema.requestHeaders) {
+    for (const header of projectHeaders(schema.requestHeaders) ?? []) {
       const name = header.name.toLowerCase();
 
       if (name === 'authorization') {
-        const exampleLower = header.example.toLowerCase();
-        if (exampleLower.startsWith('bearer') && !hasBearer) {
+        if (header.authSchemes?.includes('bearer') && !hasBearer) {
           hasBearer = true;
           securitySchemes['bearerAuth'] = { type: 'http', scheme: 'bearer' };
           securityItems.push({ bearerAuth: [] });
-        } else if (exampleLower.startsWith('basic') && !hasBasic) {
+        }
+        if (header.authSchemes?.includes('basic') && !hasBasic) {
           hasBasic = true;
           securitySchemes['basicAuth'] = { type: 'http', scheme: 'basic' };
           securityItems.push({ basicAuth: [] });
@@ -818,7 +777,7 @@ export function buildOpenApiDocument(
     options.description ??
     `Auto-generated from ${totalSamples} traffic samples (${endpointCount} endpoints)`;
 
-  // Compute global headers (present in ALL schemas with identical values)
+  // Compute global header presence independently of operation parameters.
   const globalHeaderEntries = extractGlobalHeaders(schemas);
   const globalHeaderNames = new Set(globalHeaderEntries.map((h) => h.name.toLowerCase()));
 
@@ -872,7 +831,6 @@ export function buildOpenApiDocument(
   if (options.includeMetadata === true && globalHeaderEntries.length > 0) {
     doc['x-specwatch-global-headers'] = globalHeaderEntries.map((h) => ({
       name: h.name,
-      example: h.example,
     }));
   }
 

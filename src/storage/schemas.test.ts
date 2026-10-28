@@ -37,11 +37,11 @@ const RESPONSE_SCHEMAS: Record<string, InferredSchema> = {
 };
 
 const REQ_HEADERS: HeaderEntry[] = [
-  { name: 'Authorization', example: 'Bearer ***' },
-  { name: 'Content-Type', example: 'application/json' },
+  { name: 'authorization', authSchemes: ['bearer'] },
+  { name: 'content-type' },
 ];
 
-const RESP_HEADERS: HeaderEntry[] = [{ name: 'X-Request-Id', example: 'req-abc-123' }];
+const RESP_HEADERS: HeaderEntry[] = [{ name: 'x-request-id' }];
 
 const BREAKING_CHANGES: BreakingChange[] = [
   {

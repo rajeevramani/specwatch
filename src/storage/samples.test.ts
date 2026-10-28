@@ -21,11 +21,11 @@ const OBJECT_SCHEMA: InferredSchema = {
 };
 
 const REQ_HEADERS: HeaderEntry[] = [
-  { name: 'Content-Type', example: 'application/json' },
-  { name: 'Authorization', example: 'Bearer ***' },
+  { name: 'authorization', authSchemes: ['bearer'] },
+  { name: 'content-type' },
 ];
 
-const RESP_HEADERS: HeaderEntry[] = [{ name: 'X-Request-Id', example: 'abc-123' }];
+const RESP_HEADERS: HeaderEntry[] = [{ name: 'x-request-id' }];
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -605,8 +605,8 @@ describe('realistic sample round-trip', () => {
       queryParams: undefined,
       requestSchema,
       responseSchema,
-      requestHeaders: [{ name: 'Content-Type', example: 'application/json' }],
-      responseHeaders: [{ name: 'Location', example: '/users/abc-123' }],
+      requestHeaders: [{ name: 'content-type' }],
+      responseHeaders: [{ name: 'location' }],
       capturedAt,
     });
 
@@ -623,7 +623,7 @@ describe('realistic sample round-trip', () => {
     expect(s.capturedAt).toBe(capturedAt);
     expect(s.requestSchema).toEqual(requestSchema);
     expect(s.responseSchema).toEqual(responseSchema);
-    expect(s.requestHeaders).toEqual([{ name: 'Content-Type', example: 'application/json' }]);
-    expect(s.responseHeaders).toEqual([{ name: 'Location', example: '/users/abc-123' }]);
+    expect(s.requestHeaders).toEqual([{ name: 'content-type' }]);
+    expect(s.responseHeaders).toEqual([{ name: 'location' }]);
   });
 });

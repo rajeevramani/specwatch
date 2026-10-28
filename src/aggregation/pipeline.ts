@@ -10,6 +10,7 @@
  */
 
 import type { Sample, InferredSchema, HeaderEntry, AggregatedSchema } from '../types/index.js';
+import { projectHeaders } from '../headers/metadata.js';
 import type { Database } from '../storage/database.js';
 import { mergeSchemas } from '../inference/merge.js';
 import { calculateSchemaConfidence } from './confidence.js';
@@ -640,7 +641,7 @@ export function inferEnums(
 /**
  * Merge arrays of headers from multiple samples into a deduplicated list.
  * - Deduplicates by name (case-insensitive)
- * - Keeps the first example value seen for each header name
+ * - Unions known authorization schemes and discards all unknown fields
  * - Sorts alphabetically by header name
  * - Returns undefined for empty results
  *
@@ -650,25 +651,7 @@ export function inferEnums(
 export function mergeHeaders(
   headerArrays: (HeaderEntry[] | undefined)[],
 ): HeaderEntry[] | undefined {
-  // Map from lowercase name to the first HeaderEntry seen
-  const seen = new Map<string, HeaderEntry>();
-
-  for (const headers of headerArrays) {
-    if (headers === undefined) continue;
-    for (const header of headers) {
-      const lowerName = header.name.toLowerCase();
-      if (!seen.has(lowerName)) {
-        seen.set(lowerName, header);
-      }
-    }
-  }
-
-  if (seen.size === 0) return undefined;
-
-  // Sort alphabetically by the original header name (case-insensitive)
-  return Array.from(seen.values()).sort((a, b) =>
-    a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
-  );
+  return projectHeaders(headerArrays.flatMap((headers) => headers ?? []));
 }
 
 // ============================================================

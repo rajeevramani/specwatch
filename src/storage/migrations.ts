@@ -7,6 +7,7 @@
  * individual transactions.
  */
 import type Database from 'better-sqlite3';
+import { classifyAuthorization, encodeHeaders, parseHeaderArray } from '../headers/metadata.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,10 +149,45 @@ const ADD_JSONRPC_COLUMNS: Migration = {
   },
 };
 
+/** Explicit legacy reader: ordinary runtime projection never inspects examples. */
+function upgradeHeaders(raw: string | null): string | null {
+  if (raw === null) return null;
+  const entries = parseHeaderArray(raw).map((item: unknown) => {
+    if (item === null || typeof item !== 'object') return undefined;
+    const legacy = item as { name?: unknown; example?: unknown; authSchemes?: unknown };
+    if (typeof legacy.name !== 'string') return undefined;
+    if (legacy.name.toLowerCase() !== 'authorization') return { name: legacy.name };
+    const authSchemes = [
+      ...(Array.isArray(legacy.authSchemes) ? legacy.authSchemes : []),
+      ...(classifyAuthorization(legacy.example) ?? []),
+    ];
+    return { name: legacy.name, authSchemes };
+  });
+  return encodeHeaders(entries);
+}
+
+const REMOVE_HEADER_VALUES: Migration = {
+  version: 4,
+  description: 'Retain only structural header names and closed authentication metadata',
+  up: (db) => {
+    for (const table of ['samples', 'aggregated_schemas']) {
+      // Materialize before updating: no live cursor over a changing table.
+      const rows = db.prepare(`SELECT id, request_headers, response_headers FROM ${table}`).all() as Array<{
+        id: number; request_headers: string | null; response_headers: string | null;
+      }>;
+      const update = db.prepare(`UPDATE ${table} SET request_headers = ?, response_headers = ? WHERE id = ?`);
+      for (const row of rows) {
+        update.run(upgradeHeaders(row.request_headers), upgradeHeaders(row.response_headers), row.id);
+      }
+    }
+  },
+};
+
 export const MIGRATIONS: Migration[] = [
   INITIAL_SCHEMA,
   ADD_CONSUMER_COLUMN,
   ADD_JSONRPC_COLUMNS,
+  REMOVE_HEADER_VALUES,
 ];
 
 /** The schema version that a fully-migrated database should be at. */

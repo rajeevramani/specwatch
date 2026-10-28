@@ -37,9 +37,13 @@ export function getDatabase(dbPath?: string): Database.Database {
 
   const db = new Database(resolvedPath);
 
-  runMigrations(db);
-
-  return db;
+  try {
+    runMigrations(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 /**

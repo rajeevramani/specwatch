@@ -1,6 +1,6 @@
 // Header filtering and redaction logic — owned by Proxy Engineer
 
-import type { IncomingHttpHeaders } from 'node:http';
+import { classifyAuthorization, projectHeaders } from '../headers/metadata.js';
 import type { HeaderEntry } from '../types/index.js';
 
 /**
@@ -41,68 +41,14 @@ export function isInfrastructureHeader(name: string): boolean {
   return HOP_BY_HOP_HEADERS.has(lower) || INFRASTRUCTURE_HEADERS.has(lower);
 }
 
-/**
- * Redacts the value of sensitive headers while preserving their presence.
- *
- * Rules:
- * - Authorization: keep scheme prefix (e.g., "Bearer ***", "Basic ***"), or "***" if no scheme
- * - Cookie: replace with "***"
- * - X-API-Key: replace with "***"
- *
- * Returns the original value unchanged for non-sensitive headers.
- */
-export function redactHeader(name: string, value: string): string {
-  const lower = name.toLowerCase();
-
-  if (lower === 'authorization') {
-    // Keep scheme prefix (e.g., "Bearer", "Basic", "Token") but redact the credential
-    const spaceIdx = value.indexOf(' ');
-    if (spaceIdx !== -1) {
-      const scheme = value.slice(0, spaceIdx);
-      return `${scheme} ***`;
-    }
-    return '***';
-  }
-
-  if (lower === 'cookie') {
-    return '***';
-  }
-
-  if (lower === 'x-api-key') {
-    return '***';
-  }
-
-  return value;
-}
-
-/**
- * Captures headers from an incoming HTTP request or response, applying:
- * 1. Filtering: hop-by-hop and infrastructure headers are excluded
- * 2. Redaction: sensitive header values are masked
- *
- * Returns an array of HeaderEntry objects sorted by name for stable output.
- * Returns undefined if no capturable headers are present.
- */
-export function captureHeaders(
-  headers: IncomingHttpHeaders | Record<string, string | string[] | undefined>,
-): HeaderEntry[] | undefined {
+/** Capture structural presence and a closed authorization classification only. */
+export function captureHeaders(headers: Record<string, unknown>): HeaderEntry[] | undefined {
   const entries: HeaderEntry[] = [];
-
   for (const [name, value] of Object.entries(headers)) {
-    if (value === undefined) continue;
-    if (isInfrastructureHeader(name)) continue;
-
-    // Normalise to a single string value — take only the first if array
-    const rawValue = Array.isArray(value) ? value[0] : value;
-    if (rawValue === undefined || rawValue === '') continue;
-
-    const example = redactHeader(name, rawValue);
-    entries.push({ name, example });
+    if (value === undefined || isInfrastructureHeader(name)) continue;
+    const authSchemes =
+      name.toLowerCase() === 'authorization' ? classifyAuthorization(value) : undefined;
+    entries.push(authSchemes ? { name, authSchemes } : { name });
   }
-
-  if (entries.length === 0) return undefined;
-
-  // Sort alphabetically by name for stable, deterministic output
-  entries.sort((a, b) => a.name.localeCompare(b.name));
-  return entries;
+  return projectHeaders(entries);
 }

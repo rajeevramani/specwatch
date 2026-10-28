@@ -221,15 +221,22 @@ export function convertSchemaToOpenApi(
       return hasNull ? { type: 'null' } : {};
     }
 
-    // If one non-null variant remains, inline it. Promote nullability into the
-    // type field as a JSON Schema 2020-12 type array (`type: ['string', 'null']`).
-    // The OAS 3.0 converter downgrades this to `type + nullable: true`.
+    // Inline one non-null variant. Promote null into its type when possible;
+    // references/composites instead need an explicit usage-local null branch.
+    // The OAS3.0 converter handles both forms without weakening shared models.
     if (nonNullVariants.length === 1) {
       const inlined = convertSchemaToOpenApi(nonNullVariants[0], collector);
-      if (hasNull && typeof inlined['type'] === 'string') {
-        return { ...inlined, type: [inlined['type'] as string, 'null'] };
+      if (!hasNull) return inlined;
+      const type = inlined['type'];
+      if (typeof type === 'string') {
+        return type === 'null' ? inlined : { ...inlined, type: [type, 'null'] };
       }
-      return inlined;
+      if (Array.isArray(type)) {
+        return type.includes('null') ? inlined : { ...inlined, type: [...type, 'null'] };
+      }
+      // References and composite schemas have no type to promote. Keep null
+      // local to this usage rather than weakening the shared model component.
+      return { oneOf: [inlined, { type: 'null' }] };
     }
 
     // Multiple non-null variants: keep oneOf, append a null branch if observed.
@@ -866,6 +873,31 @@ function convertSchemaTo30(schema: Record<string, unknown>): Record<string, unkn
       result['type'] = 'string';
       result['nullable'] = true;
     } else if (key === 'oneOf' && Array.isArray(value)) {
+      const nullIndex = value.findIndex(
+        (variant) =>
+          typeof variant === 'object' &&
+          variant !== null &&
+          Object.keys(variant).length === 1 &&
+          variant['type'] === 'null',
+      );
+      const nonNull = value[1 - nullIndex];
+      if (
+        value.length === 2 &&
+        nullIndex !== -1 &&
+        typeof nonNull === 'object' &&
+        nonNull !== null &&
+        !Array.isArray(nonNull) &&
+        nonNull['type'] !== 'null'
+      ) {
+        // OAS3.0 nullable needs an explicit type; enum restricts this branch
+        // to null alone. Preserve any existing sibling anyOf constraint.
+        const unionKey = 'anyOf' in schema ? 'oneOf' : 'anyOf';
+        result[unionKey] = [
+          convertSchemaTo30(nonNull as Record<string, unknown>),
+          { type: 'object', nullable: true, enum: [null] },
+        ];
+        continue;
+      }
       result['oneOf'] = value.map((v) =>
         typeof v === 'object' && v !== null ? convertSchemaTo30(v as Record<string, unknown>) : v,
       );

@@ -22,6 +22,9 @@ Local candidate `0.4.0` and minimum Node22 are approved for preparation, not pub
 
 ### Fixed
 
+- Successful static sibling routes no longer collapse into invented parameterized endpoints solely because their response shapes match. Uncertain alphabetic IDs remain literal; recognized capture normalization is unchanged, and conservative legacy/manual ID grouping remains supported.
+- Nullable promoted-model references retain their null alternative in OpenAPI 3.1 and 3.0, without making shared non-null models nullable. The 3.0 representation uses an explicit null-only union branch rather than a misleading `nullable` sibling on a reference.
+
 - Response-header capture observes explicit object/status-message/raw-array `writeHead` arguments as well as implicit `setHeader` paths, without changing native forwarding, override/duplicate behavior or original protocol errors. Projection failure cannot prevent the original response.
 - Seven TypeScript errors corrected; `typecheck` is now mandatory in CI, and tests build the CLI first so subprocess tests run current code.
 

@@ -11,6 +11,8 @@ Local candidate `0.4.0` and minimum Node22 are approved for preparation, not pub
 
 ### Changed / migration
 
+- **Regenerate learned contracts after these inference repairs.** Reaggregate stored captures and export again to recalculate required fields. Component names and reference layouts can change because incompatible constraint sets no longer share a model. Compare regenerated specs and refresh generated client bindings; existing exported files are not rewritten. No new database migration is introduced by these repairs.
+
 - **Plain capture is the supported interface, including human TTY sessions.** The earlier local dashboard is dormant, not a supported `0.4.0` feature, and has no CLI opt-in. Its aggregate-then-quit snapshot collision remains a recorded defect, not a fixed/passing path. Use explicit aggregation/export commands and `Ctrl+C` for owned-process shutdown.
 
 - **Minimum runtime is Node.js 22.** Node20 support is dropped to align the package, CI and Ink dependency requirements. Earlier successful Node20 execution is not qualification of the new candidate.
@@ -21,6 +23,13 @@ Local candidate `0.4.0` and minimum Node22 are approved for preparation, not pub
 - **Logical cleanup is not secure erasure:** historic values may survive WAL/free pages, snapshots, backups and existing exports, which are not automatically erased. The strict header guarantee applies to new retained/exported metadata, not all path/query/schema values or caller-owned historical files.
 
 ### Fixed
+
+- Conditional requiredness now visits nullable variants and array items using their actual object populations. Zero observations do not establish required fields, and PATCH request optionality is preserved.
+- Shared model discovery preserves requiredness, enum and format distinctions. Promoted parent bodies reference shared children with resolvable dependencies and collision-safe component names; confidence-filtered endpoints do not leave unrelated model definitions behind.
+- Null-only and multi-variant OpenAPI 3.0 branches no longer admit arbitrary strings. Nullable categorical enums retain observed null in both versions without widening non-null enum usages.
+- Alphabetic low-cardinality `*Code` fields can infer enums; numeric and identifier-like value controls and other name guards remain.
+- Operation matching respects fixed literals and template specificity. Agent evidence joins unique compatible operation keys without losing counts; genuinely ambiguous mappings remain separate with warnings.
+- GET retry analysis distinguishes concrete resource IDs and captured query values before grouping. Repeated query keys remain last-value-wins metadata, not a complete transport-equivalence record.
 
 - Successful static sibling routes no longer collapse into invented parameterized endpoints solely because their response shapes match. Uncertain alphabetic IDs remain literal; recognized capture normalization is unchanged, and conservative legacy/manual ID grouping remains supported.
 - Nullable promoted-model references retain their null alternative in OpenAPI 3.1 and 3.0, without making shared non-null models nullable. The 3.0 representation uses an explicit null-only union branch rather than a misleading `nullable` sibling on a reference.

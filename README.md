@@ -67,9 +67,9 @@ Human sessions use plain, line-oriented output even on an interactive terminal. 
 ### What inference captures
 
 - Observed paths/methods and inferred path parameters. Numeric, UUID and recognized digit-bearing values retain contextual normalization; uncertain alphabetic paths such as `/owners/owner_alice` remain literal. Matching response shapes alone do not justify combining static resources such as `/config/theme` and `/config/language`.
-- JSON body types, nested objects/arrays, formats and union shapes.
-- Required fields based on observed presence; PATCH request fields are not marked required.
-- Low-cardinality string enums, subject to sample and field/value heuristics.
+- JSON body types, nested objects/arrays, formats and union shapes. Shared models preserve their constraints and reference shared children; differently constrained shapes do not share an arbitrary representative.
+- Required fields based on 100% presence within each observed object population, including non-null union variants and array elements; genuinely missing fields remain optional. PATCH request fields are not marked required.
+- Low-cardinality string enums, including alphabetic code-suffix fields, subject to sample and field/value heuristics. These inferred constraints are not proof that the API has a closed value set.
 - Query parameters, observed response codes and schema differences across sessions.
 - Structural header names and derived Bearer/Basic classifications; X-API-Key presence supports API-key discovery.
 
@@ -115,7 +115,7 @@ specwatch agent-report --name "my-agent" --human
 specwatch agent-report --name "my-agent" --format human
 ```
 
-`--pretty` is another human-output alias. The report surfaces verification loops, thin responses and redundancy signals; these are evidence to investigate, not proven causal explanations or guaranteed savings.
+`--pretty` is another human-output alias. The report surfaces verification loops, thin responses and redundancy signals; these are evidence to investigate, not proven causal explanations or guaranteed savings. Consecutive GET duplication compares concrete resource paths and captured query maps, not operation templates alone. Captured query maps retain the last value for a repeated key, so full repeated-query multiplicity is unavailable; matching captured inputs does not prove a request was unnecessary.
 
 To attach source-spec navigation:
 

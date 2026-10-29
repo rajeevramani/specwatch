@@ -8,8 +8,36 @@
  */
 
 import type { AggregatedSchema, InferredSchema } from '../types/index.js';
-import { computeSchemaFingerprint } from '../aggregation/pipeline.js';
-import { convertSchemaToOpenApi } from './openapi.js';
+import { convertSchemaToOpenApi, createSchemaCollector } from './openapi.js';
+
+// Model sharing must preserve the exported contract, not just property/type shape.
+// Conversion here has no collector, so identities do not depend on registration.
+function computeDomainModelFingerprint(schema: InferredSchema): string {
+  const unorderedArrays = new Set(['required', 'enum', 'type', 'oneOf', 'anyOf', 'allOf']);
+  function canonical(value: unknown, keyword?: string): unknown {
+    if (Array.isArray(value)) {
+      const items = value.map((item) => canonical(item));
+      if (keyword !== undefined && unorderedArrays.has(keyword)) {
+        items.sort((a, b) => {
+          const left = JSON.stringify(a);
+          const right = JSON.stringify(b);
+          return left < right ? -1 : left > right ? 1 : 0;
+        });
+      }
+      return items;
+    }
+    if (value !== null && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .map((key) => [key, canonical(record[key], key)]),
+      );
+    }
+    return value;
+  }
+  return JSON.stringify(canonical(convertSchemaToOpenApi(schema)));
+}
 
 // ============================================================
 // Types
@@ -263,7 +291,7 @@ export class DomainModelRegistry {
    * Returns undefined if no match.
    */
   resolve(schema: InferredSchema): DomainModelMatch | undefined {
-    const fingerprint = computeSchemaFingerprint(schema);
+    const fingerprint = computeDomainModelFingerprint(schema);
 
     // Direct match
     const directModel = this._models.get(fingerprint);
@@ -273,7 +301,7 @@ export class DomainModelRegistry {
 
     // Array-of match: check if this is an array whose items match a model
     if (schema.type === 'array' && schema.items !== undefined) {
-      const itemFingerprint = computeSchemaFingerprint(schema.items);
+      const itemFingerprint = computeDomainModelFingerprint(schema.items);
       const itemModel = this._models.get(itemFingerprint);
       if (itemModel) {
         return { model: itemModel, isArrayItem: true };
@@ -307,21 +335,15 @@ export function discoverDomainModels(schemas: AggregatedSchema[]): DomainModelRe
   const registry = new DomainModelRegistry();
 
   // Accumulate: fingerprint → { schema, usages[] }
-  const candidates: Map<
-    string,
-    { schema: InferredSchema; usages: DomainModelUsage[] }
-  > = new Map();
+  const candidates: Map<string, { schema: InferredSchema; usages: DomainModelUsage[] }> = new Map();
 
-  function trackSchema(
-    schema: InferredSchema,
-    usage: DomainModelUsage,
-  ): void {
+  function trackSchema(schema: InferredSchema, usage: DomainModelUsage): void {
     // Only consider object schemas with ≥2 properties as domain models. Tiny
     // shapes (≤1 property) and primitives are not meaningful candidates.
     if (schema.type !== 'object') return;
     if (schema.properties === undefined || Object.keys(schema.properties).length < 2) return;
 
-    const fingerprint = computeSchemaFingerprint(schema);
+    const fingerprint = computeDomainModelFingerprint(schema);
     const existing = candidates.get(fingerprint);
     if (existing) {
       existing.usages.push(usage);
@@ -405,7 +427,10 @@ export function discoverDomainModels(schemas: AggregatedSchema[]): DomainModelRe
   // Only promote schemas that appear in 2+ distinct endpoints to domain models
   const usedNames = new Set<string>();
 
-  for (const [fingerprint, { schema, usages }] of candidates) {
+  const orderedCandidates = [...candidates].sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
+  for (const [fingerprint, { schema, usages }] of orderedCandidates) {
     // Count distinct endpoints (unique method+path combos)
     const distinctEndpoints = new Set(usages.map((u) => `${u.httpMethod} ${u.path}`));
     if (distinctEndpoints.size < 2) continue;
@@ -431,5 +456,12 @@ export function discoverDomainModels(schemas: AggregatedSchema[]): DomainModelRe
     });
   }
 
+  // Resolve child models only after every promoted identity/name is registered.
+  for (const model of registry.models) {
+    model.openApiSchema = convertSchemaToOpenApi(
+      model.schema,
+      createSchemaCollector(registry, model.fingerprint),
+    );
+  }
   return registry;
 }

@@ -130,11 +130,20 @@ describe('nullable reference conversion (finding5)', () => {
 
   it('does not treat an annotated or constrained null branch as the pure generated pair', () => {
     const raw = document({ oneOf: [ref, { type: 'null', description: 'retained annotation' }] });
-    const result = schemas(convertToOpenApi30(raw)).Envelope;
+    const converted = convertToOpenApi30(raw);
+    const result = schemas(converted).Envelope;
     expect(result.anyOf).toBeUndefined();
     expect(result.oneOf).toEqual([
       ref,
-      { type: 'string', nullable: true, description: 'retained annotation' },
+      { type: 'object', nullable: true, enum: [null], description: 'retained annotation' },
     ]);
+    const validate = new Ajv({ strict: false }).compile({
+      $ref: '#/components/schemas/Envelope',
+      components: converted.components,
+    });
+    expect(validate(null)).toBe(true);
+    expect(validate({ id: 7, name: 'fixture' })).toBe(true);
+    expect(validate('arbitrary')).toBe(false);
+    expect(validate({})).toBe(false);
   });
 });

@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import type { InferredSchema, AggregatedSchema, ExportOptions, HeaderEntry } from '../types/index.js';
 import { projectHeaders } from '../headers/metadata.js';
 import type { AgentExtension } from '../analysis/agent-extensions.js';
-import type { DomainModelRegistry } from './domain-models.js';
+import type { DomainModelRegistry, DomainModel } from './domain-models.js';
 
 // ============================================================
 // Schema Name Generation & $ref Extraction
@@ -103,58 +103,64 @@ function schemasAreEqual(a: unknown, b: unknown): boolean {
   return aKeys.every((key) => key in bObj && schemasAreEqual(aObj[key], bObj[key]));
 }
 
-function createSchemaCollector(domainModels?: DomainModelRegistry): SchemaCollector {
-  const schemas: Record<string, Record<string, unknown>> = {};
+export function createSchemaCollector(
+  domainModels?: DomainModelRegistry,
+  excludedFingerprint?: string,
+): SchemaCollector {
+  const schemas = new Map<string, Record<string, unknown>>();
+  const reference = (name: string) =>
+    `#/components/schemas/${name.replace(/~/g, '~0').replace(/\//g, '~1')}`;
+  const modelsByName = new Map(domainModels?.models.map((model) => [model.name, model]) ?? []);
+  const modelsByReference = new Map(
+    [...modelsByName.values()].map((model) => [reference(model.name), model]),
+  );
+
+  function collectModel(model: DomainModel): void {
+    if (schemas.has(model.name)) return;
+    // Reserve before following dependencies, including recursive reference graphs.
+    schemas.set(model.name, model.openApiSchema);
+    function visit(value: unknown): void {
+      if (value === null || typeof value !== 'object') return;
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      const record = value as Record<string, unknown>;
+      if (typeof record['$ref'] === 'string') {
+        const dependency = modelsByReference.get(record['$ref']);
+        if (dependency) collectModel(dependency);
+      }
+      Object.values(record).forEach(visit);
+    }
+    visit(model.openApiSchema);
+  }
+
   return {
     register(name: string, schema: Record<string, unknown>): string {
-      if (name in schemas) {
-        // Same name already registered — check if schemas are identical
-        if (schemasAreEqual(schemas[name], schema)) {
-          // Structurally identical: reuse the existing name
-          return `#/components/schemas/${name}`;
+      let candidate = name;
+      let suffix = 2;
+      // All promoted names are reserved, even before they become reachable.
+      while (schemas.has(candidate) || modelsByName.has(candidate)) {
+        const model = modelsByName.get(candidate);
+        const existing = schemas.get(candidate) ?? model?.openApiSchema;
+        if (schemasAreEqual(existing, schema)) {
+          if (model) collectModel(model);
+          return reference(candidate);
         }
-        // Different schema with same name: find a unique suffixed name
-        let suffix = 2;
-        while (`${name}${suffix}` in schemas) {
-          if (schemasAreEqual(schemas[`${name}${suffix}`], schema)) {
-            // Found an existing suffixed entry that matches
-            return `#/components/schemas/${name}${suffix}`;
-          }
-          suffix++;
-        }
-        const uniqueName = `${name}${suffix}`;
-        schemas[uniqueName] = schema;
-        return `#/components/schemas/${uniqueName}`;
+        candidate = `${name}${suffix++}`;
       }
-      schemas[name] = schema;
-      return `#/components/schemas/${name}`;
+      schemas.set(candidate, schema);
+      return reference(candidate);
     },
     getSchemas(): Record<string, Record<string, unknown>> {
-      return schemas;
+      return Object.fromEntries(schemas);
     },
     resolveWithDomainModel(schema: InferredSchema): Record<string, unknown> | undefined {
-      if (domainModels === undefined) return undefined;
-
-      const match = domainModels.resolve(schema);
-      if (match === undefined) return undefined;
-
-      const modelName = match.model.name;
-
-      // Ensure the domain model schema is registered in components/schemas
-      if (!(modelName in schemas)) {
-        schemas[modelName] = match.model.openApiSchema;
-      }
-
-      if (match.isArrayItem) {
-        // Array-of match: return array wrapper with $ref to the item model
-        return {
-          type: 'array',
-          items: { $ref: `#/components/schemas/${modelName}` },
-        };
-      }
-
-      // Direct match: return $ref
-      return { $ref: `#/components/schemas/${modelName}` };
+      const match = domainModels?.resolve(schema);
+      if (match === undefined || match.model.fingerprint === excludedFingerprint) return undefined;
+      collectModel(match.model);
+      const ref = { $ref: reference(match.model.name) };
+      return match.isArrayItem ? { type: 'array', items: ref } : ref;
     },
   };
 }
@@ -228,11 +234,19 @@ export function convertSchemaToOpenApi(
       const inlined = convertSchemaToOpenApi(nonNullVariants[0], collector);
       if (!hasNull) return inlined;
       const type = inlined['type'];
+      const nullableEnum =
+        Array.isArray(inlined['enum']) && !inlined['enum'].includes(null)
+          ? { enum: [...inlined['enum'], null] }
+          : {};
       if (typeof type === 'string') {
-        return type === 'null' ? inlined : { ...inlined, type: [type, 'null'] };
+        return type === 'null' ? inlined : { ...inlined, ...nullableEnum, type: [type, 'null'] };
       }
       if (Array.isArray(type)) {
-        return type.includes('null') ? inlined : { ...inlined, type: [...type, 'null'] };
+        return {
+          ...inlined,
+          ...nullableEnum,
+          type: type.includes('null') ? type : [...type, 'null'],
+        };
       }
       // References and composite schemas have no type to promote. Keep null
       // local to this usage rather than weakening the shared model component.
@@ -770,11 +784,14 @@ export function detectSecuritySchemes(
  * @returns OpenAPI document as a plain object
  */
 export function buildOpenApiDocument(
-  schemas: AggregatedSchema[],
+  allSchemas: AggregatedSchema[],
   options: Partial<ExportOptions> = {},
   agentExtensions?: Record<string, AgentExtension>,
   domainModels?: DomainModelRegistry,
 ): Record<string, unknown> {
+  const schemas = allSchemas.filter(
+    (schema) => schema.confidenceScore >= (options.minConfidence ?? 0),
+  );
   const title = options.title ?? 'API';
   const version = options.version ?? '1.0.0';
   const totalSamples = schemas.reduce((sum, s) => sum + s.sampleCount, 0);
@@ -792,13 +809,7 @@ export function buildOpenApiDocument(
   // Pass domain models registry so the collector can resolve shared schemas
   const collector = createSchemaCollector(domainModels);
 
-  // Pre-register domain models into components/schemas for consistent naming
-  if (domainModels !== undefined) {
-    for (const model of domainModels.models) {
-      collector.register(model.name, model.openApiSchema);
-    }
-  }
-
+  // Model names are reserved by the collector; only used model closures are emitted.
   const paths = buildPathsObject(schemas, options, globalHeaderNames, collector, agentExtensions);
 
   const doc: Record<string, unknown> = {
@@ -866,11 +877,10 @@ function convertSchemaTo30(schema: Record<string, unknown>): Record<string, unkn
       if (types.includes('null')) {
         result['nullable'] = true;
       }
-      result['type'] = nonNull.length === 1 ? nonNull[0] : nonNull[0] ?? 'string';
+      result['type'] = nonNull[0] ?? (types.includes('null') ? 'object' : 'string');
     } else if (key === 'type' && value === 'null') {
-      // OAS 3.0 has no standalone null type — fall back to nullable string,
-      // which is the closest valid representation when only null was observed.
-      result['type'] = 'string';
+      // OAS3.0 needs a local type for nullable; enum below restricts it to null.
+      result['type'] = 'object';
       result['nullable'] = true;
     } else if (key === 'oneOf' && Array.isArray(value)) {
       const nullIndex = value.findIndex(
@@ -917,6 +927,19 @@ function convertSchemaTo30(schema: Record<string, unknown>): Record<string, unkn
     }
   }
 
+  // Keep null exact even if an original enum is present; all other enum values
+  // are incompatible with a null-only type. Preserve an empty intersection.
+  if (
+    schema['type'] === 'null' ||
+    (Array.isArray(schema['type']) &&
+      schema['type'].length > 0 &&
+      schema['type'].every((type) => type === 'null'))
+  ) {
+    result['enum'] = [null];
+    if (Array.isArray(schema['enum']) && !schema['enum'].includes(null)) {
+      result['not'] = {};
+    }
+  }
   return result;
 }
 

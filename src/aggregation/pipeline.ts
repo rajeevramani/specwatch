@@ -412,6 +412,20 @@ export function calculateRequiredFields(
   totalSamples: number,
   httpMethod?: string,
 ): InferredSchema {
+  if (schema.oneOf !== undefined) {
+    return {
+      ...schema,
+      oneOf: schema.oneOf.map((variant) =>
+        calculateRequiredFields(variant, variant.stats.presenceCount, httpMethod),
+      ),
+    };
+  }
+  if (schema.type === 'array' && schema.items !== undefined) {
+    return {
+      ...schema,
+      items: calculateRequiredFields(schema.items, schema.items.stats.presenceCount, httpMethod),
+    };
+  }
   if (schema.type !== 'object' || schema.properties === undefined) {
     return schema;
   }
@@ -425,26 +439,17 @@ export function calculateRequiredFields(
   for (const [fieldName, fieldSchema] of Object.entries(schema.properties)) {
     // A field is required if it was present in 100% of samples
     // (but never for PATCH requests — partial update semantics)
-    if (!isPatch && fieldSchema.stats.presenceCount === totalSamples) {
+    if (!isPatch && totalSamples > 0 && fieldSchema.stats.presenceCount === totalSamples) {
       required.push(fieldName);
     }
 
-    // Recurse into nested objects (pass httpMethod to propagate PATCH semantics)
-    let updatedFieldSchema = fieldSchema;
-    if (fieldSchema.type === 'object' && fieldSchema.properties !== undefined) {
-      // For nested objects, use the field's presenceCount as the total
-      // (only samples that had this field count toward nested required)
-      updatedFieldSchema = calculateRequiredFields(
-        fieldSchema,
-        fieldSchema.stats.presenceCount,
-        httpMethod,
-      );
-    } else if (fieldSchema.type === 'array' && fieldSchema.items !== undefined) {
-      const updatedItems = calculateRequiredFields(fieldSchema.items, totalSamples, httpMethod);
-      updatedFieldSchema = { ...fieldSchema, items: updatedItems };
-    }
-
-    updatedProperties[fieldName] = updatedFieldSchema;
+    // Each nested object population is conditional on that value being observed;
+    // array items and union alternatives recurse using their own populations.
+    updatedProperties[fieldName] = calculateRequiredFields(
+      fieldSchema,
+      fieldSchema.stats.presenceCount,
+      httpMethod,
+    );
   }
 
   // Sort required fields alphabetically (per spec)
@@ -527,7 +532,6 @@ const NON_ENUM_FIELD_SUFFIXES = [
   'uri',
   'token',
   'hash',
-  'code',
   'price',
   'amount',
   'cost',

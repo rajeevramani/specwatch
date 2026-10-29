@@ -112,11 +112,42 @@ interface OperationAccumulator {
 
 export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEvidence {
   const accumulators = new Map<string, OperationAccumulator>();
+  const endpoints = [
+    ...new Map(
+      opts.completenessReport.endpoints
+        .filter((endpoint) => HTTP_METHODS.has(endpoint.method.toUpperCase()))
+        .map((endpoint) => {
+          const operation = { method: endpoint.method.toUpperCase(), path: endpoint.path };
+          return [JSON.stringify([operation.method, operation.path]), operation] as const;
+        }),
+    ).values(),
+  ];
+
+  function canonicalPath(method: string, path: string): string {
+    if (!HTTP_METHODS.has(method.toUpperCase())) return path;
+    const match = matchOpenApiOperation(endpoints, method, path);
+    if (match.operation) return match.operation.path;
+    if (match.ambiguous) {
+      const acc = getAccumulator(accumulators, method, path);
+      const warning = `Ambiguous completeness endpoint mapping for ${method.toUpperCase()} ${path}; original operation retained`;
+      if (!acc.warnings.includes(warning)) acc.warnings.push(warning);
+    }
+    return path;
+  }
+  const sequences = opts.sequenceAnalysis.sequences.map((sequence) => ({
+    ...sequence,
+    fromPath: canonicalPath(sequence.fromMethod, sequence.fromPath),
+    toPath: canonicalPath(sequence.toMethod, sequence.toPath),
+  }));
 
   for (const tool of opts.sequenceAnalysis.toolUsage) {
     const parsed = parseOperationKey(tool.operationKey);
     if (!parsed) continue;
-    getAccumulator(accumulators, parsed.method, parsed.path).observedCount = tool.count;
+    getAccumulator(
+      accumulators,
+      parsed.method,
+      canonicalPath(parsed.method, parsed.path),
+    ).observedCount += tool.count;
   }
 
   // Operation-level evidence is REST-only in v1: JSON-RPC completeness
@@ -140,7 +171,7 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
   // sequence counts overcount duplicates; JSON-RPC protocol/tool redundancy is
   // therefore surfaced at the report level (redundantCalls) rather than folded
   // into per-operation evidence here (deferred to a later phase).
-  for (const seq of opts.sequenceAnalysis.sequences) {
+  for (const seq of sequences) {
     if (!HTTP_METHODS.has(seq.fromMethod.toUpperCase())) continue;
     if (seq.pattern === 'verification_loop') {
       const acc = getAccumulator(accumulators, seq.fromMethod, seq.fromPath);
@@ -151,7 +182,7 @@ export function buildAgentEvidence(opts: BuildAgentEvidenceOptions): AgentEviden
     }
   }
 
-  const nextSteps = collectNextSteps(opts.sequenceAnalysis.sequences);
+  const nextSteps = collectNextSteps(sequences);
   for (const [operationKey, steps] of nextSteps) {
     const parsed = parseOperationKey(operationKey);
     if (!parsed) continue;

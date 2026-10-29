@@ -13,8 +13,8 @@ export interface OpenApiOperationRef {
   specLocation: string;
 }
 
-export interface OperationMatch {
-  operation?: OpenApiOperationRef;
+export interface OperationMatch<T = OpenApiOperationRef> {
+  operation?: T;
   warning?: string;
   /** True when the warning is from multiple candidate operations (not a no-match). */
   ambiguous?: boolean;
@@ -64,11 +64,11 @@ export function collectOpenApiOperations(spec: Record<string, unknown>): OpenApi
   return operations;
 }
 
-export function matchOpenApiOperation(
-  operations: OpenApiOperationRef[],
+export function matchOpenApiOperation<T extends Pick<OpenApiOperationRef, 'method' | 'path'>>(
+  operations: T[],
   method: string,
   observedPath: string,
-): OperationMatch {
+): OperationMatch<T> {
   const normalizedMethod = method.toUpperCase();
   const methodMatches = operations.filter((op) => op.method === normalizedMethod);
 
@@ -81,7 +81,11 @@ export function matchOpenApiOperation(
     };
   }
 
-  const templated = methodMatches.filter((op) => pathTemplatesCompatible(op.path, observedPath));
+  const compatible = methodMatches.filter((op) => pathTemplatesCompatible(op.path, observedPath));
+  const specificity = (op: T) =>
+    splitPath(op.path).filter((segment) => !isTemplateSegment(segment)).length;
+  const best = compatible.reduce((score, op) => Math.max(score, specificity(op)), -1);
+  const templated = compatible.filter((op) => specificity(op) === best);
   if (templated.length === 1) return { operation: templated[0] };
   if (templated.length > 1) {
     return {
@@ -110,8 +114,7 @@ function pathTemplatesCompatible(specPath: string, observedPath: string): boolea
     const observedSegment = observedSegments[index];
     return (
       specSegment === observedSegment ||
-      isTemplateSegment(specSegment) ||
-      isTemplateSegment(observedSegment)
+      isTemplateSegment(specSegment)
     );
   });
 }

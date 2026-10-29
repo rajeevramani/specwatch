@@ -85,6 +85,7 @@ interface SequenceKey {
   fromPath: string;
   toMethod: string;
   toPath: string;
+  equivalentCapturedRequest?: boolean;
 }
 
 interface SequenceAccumulator {
@@ -135,6 +136,7 @@ export function classifyPattern(
   toMethod: string,
   toPath: string,
   avgDelayMs: number,
+  equivalentCapturedRequest = true,
 ): SequencePattern {
   const fromBase = getResourceBase(fromPath);
   const toBase = getResourceBase(toPath);
@@ -169,7 +171,12 @@ export function classifyPattern(
   // Restricted to GET: two identical writes (POST/PUT/PATCH/DELETE) can be
   // legitimate distinct operations, so they are NOT inferred redundant from
   // method+path alone (would need request-body/status evidence — deferred).
-  if (fromMethod === 'GET' && toMethod === 'GET' && fromPath === toPath) {
+  if (
+    fromMethod === 'GET' &&
+    toMethod === 'GET' &&
+    fromPath === toPath &&
+    equivalentCapturedRequest
+  ) {
     return 'retry';
   }
 
@@ -225,7 +232,13 @@ export function classifyJsonRpcPattern(fromKey: string, toKey: string): Sequence
  * Build a string key for grouping identical sequences.
  */
 function sequenceKeyString(key: SequenceKey): string {
-  return `${key.fromMethod} ${key.fromPath} -> ${key.toMethod} ${key.toPath}`;
+  return JSON.stringify([
+    key.fromMethod,
+    key.fromPath,
+    key.toMethod,
+    key.toPath,
+    key.equivalentCapturedRequest,
+  ]);
 }
 
 /**
@@ -257,6 +270,16 @@ const WINDOW_SIZE = 5;
 
 /** Operations expected to be called only once per session. */
 const ONCE_PER_SESSION = new Set(['initialize', 'tools/list', 'notifications/initialized']);
+
+function capturedQueriesEqual(left: Sample['queryParams'], right: Sample['queryParams']): boolean {
+  const a = left ?? {};
+  const b = right ?? {};
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && a[key] === b[key])
+  );
+}
 
 export function detectSequences(db: Database.Database, sessionId: string): SequenceAnalysis {
   const empty: SequenceAnalysis = {
@@ -347,12 +370,21 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
     for (let i = 0; i < samples.length - 1; i++) {
       const fromOp = ops[i];
       const toOp = ops[i + 1];
+      const retryCandidate =
+        fromOp.method === 'GET' && toOp.method === 'GET' && fromOp.path === toOp.path;
 
       const key: SequenceKey = {
         fromMethod: fromOp.method,
         fromPath: fromOp.path,
         toMethod: toOp.method,
         toPath: toOp.path,
+        ...(retryCandidate
+          ? {
+              equivalentCapturedRequest:
+                samples[i].path === samples[i + 1].path &&
+                capturedQueriesEqual(samples[i].queryParams, samples[i + 1].queryParams),
+            }
+          : {}),
       };
 
       const keyStr = sequenceKeyString(key);
@@ -382,6 +414,7 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
           acc.key.toMethod,
           acc.key.toPath,
           avgDelayMs,
+          acc.key.equivalentCapturedRequest,
         );
 
     sequences.push({

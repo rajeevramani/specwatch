@@ -27,6 +27,7 @@ import { runAggregation } from '../aggregation/pipeline.js';
 import { detectBreakingChanges } from '../aggregation/diff.js';
 import { buildOpenApiDocument, serializeOpenApi, convertToOpenApi30 } from '../export/openapi.js';
 import { buildJsonExport, serializeJson } from '../export/json.js';
+import { prepareLearnedSchemasForExport } from '../export/learned-contract.js';
 import { detectSequences } from '../analysis/sequences.js';
 import { detectPhases } from '../analysis/phases.js';
 import { investigateRedundantCalls, investigateOperation } from '../analysis/investigation.js';
@@ -651,6 +652,11 @@ export function createProgram(): Command {
     .option('--min-confidence <n>', 'Minimum confidence threshold (0-1)', '0')
     .option('--openapi-version <ver>', 'OpenAPI version: 3.0 or 3.1', '3.1')
     .option('--include-metadata', 'Include x-specwatch-* extensions')
+    .option(
+      '--include-inferred-enums',
+      'Include sampled enum constraints in OpenAPI (may reject unseen valid values; no effect on raw --format json)',
+      false,
+    )
     .option('--name <name>', 'Session name (alternative to session ID)')
     .option('--snapshot <n>', 'Snapshot number (defaults to latest)')
     .action(
@@ -731,9 +737,15 @@ export function createProgram(): Command {
               }
             }
 
-            const domainModels = discoverDomainModels(filtered);
-            let doc = buildOpenApiDocument(
+            // Agent analysis above deliberately uses the original learning data.
+            // Apply contract policy before discovery so no stale model can reintroduce enums.
+            const contractSchemas = prepareLearnedSchemasForExport(
               filtered,
+              opts['includeInferredEnums'] === true,
+            );
+            const domainModels = discoverDomainModels(contractSchemas);
+            let doc = buildOpenApiDocument(
+              contractSchemas,
               exportOptions,
               agentExtensionsMap,
               domainModels,

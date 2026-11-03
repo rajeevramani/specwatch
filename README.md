@@ -20,7 +20,7 @@ Commands below assume that exact installed candidate is available as `specwatch`
 
 Use Specwatch in development or staging to bootstrap a spec for an undocumented API, inspect observed schema changes, or investigate agent request patterns. Do not put it in a production payment flow or another critical path.
 
-Generated specs describe **observations, not the complete API contract**. Unexercised operations, rare errors, unseen optional fields and alternative branches remain unknown. Counts and confidence describe captured evidence, not a percentage of total API coverage. Review paths, nullability, enums, required fields and component references before generating clients or treating a spec as authoritative.
+Generated specs describe **observations, not the complete API contract**. Unexercised operations, rare errors, unseen optional fields and alternative branches remain unknown. Counts and confidence describe captured evidence, not a percentage of total API coverage. Review paths, nullability, required fields and component references before generating clients or treating a spec as authoritative. Traffic-derived OpenAPI exports conservatively omit sampled categorical enum constraints by default; opt in explicitly when those estimated closed sets are useful.
 
 ## Learn an API
 
@@ -69,11 +69,27 @@ Human sessions use plain, line-oriented output even on an interactive terminal. 
 - Observed paths/methods and inferred path parameters. Numeric, UUID and recognized digit-bearing values retain contextual normalization; uncertain alphabetic paths such as `/owners/owner_alice` remain literal. Matching response shapes alone do not justify combining static resources such as `/config/theme` and `/config/language`.
 - JSON body types, nested objects/arrays, formats and union shapes. Shared models preserve their constraints and reference shared children; differently constrained shapes do not share an arbitrary representative.
 - Required fields based on 100% presence within each observed object population, including non-null union variants and array elements; genuinely missing fields remain optional. PATCH request fields are not marked required.
-- Low-cardinality string enums, including alphabetic code-suffix fields, subject to sample and field/value heuristics. These inferred constraints are not proof that the API has a closed value set.
+- Low-cardinality string enum candidates, including alphabetic code-suffix fields, subject to sample and field/value heuristics. Candidates remain in stored learning data/raw JSON; OpenAPI enforces them only with `--include-inferred-enums`. Observed labels do not prove that the API has a closed value set.
 - Query parameters, observed response codes and schema differences across sessions.
 - Structural header names and derived Bearer/Basic classifications; X-API-Key presence supports API-key discovery.
 
 Current request-body aggregation prefers successful (2xx) observations when any exist, excluding error-only request fields; when no 2xx exists, it uses the observed error groups. Repeated-call and completeness classifications are heuristics, not proof that a call was unnecessary or that a missing field caused it. Some OpenAPI/analysis correctness boundaries remain under revalidation; this candidate is not release-qualified merely because a fixture passes.
+
+### Conservative contracts and optional enum constraints
+
+By default, traffic-derived OpenAPI leaves learned categorical strings open while preserving observed types, formats, required fields and nullability. Repeatedly seeing one bank identifier or two status labels does not establish that other strings are invalid. To restore the earlier sampled-enum validation behavior, opt in per export:
+
+```bash
+specwatch export --name "my-api" --output conservative.yaml
+specwatch export --name "my-api" --include-inferred-enums --output sampled-enums.yaml
+specwatch export --name "my-api" --format json --output learning-data.json
+```
+
+`--include-inferred-enums` applies to OpenAPI 3.1/3.0 in either JSON or YAML, independently of `--include-metadata`. It has no effect on raw `--format json`, which retains candidate enum information unchanged. Opt-in constraints may reject unseen-but-valid values; review them before client generation or validation.
+
+The conservative policy also applies immediately to previously stored snapshots, without reaggregation or database mutation. Existing exported files are not rewritten. Model discovery runs after the chosen policy, so component names/references can differ between modes. Regenerate and compare specs/client bindings when switching modes. Programmatic lower-level schema converters still preserve explicit caller-provided enum constraints. OpenAPI 3.0's `enum: [null]` null-only encoding remains intact: it is a semantic representation, not a guessed category.
+
+Within the existing model-name priorities, competing eligible paths now use a fixed, locale-independent lexical tie-break instead of whichever usage arrived first. Some fallback component names change; inspect regenerated references. Structural names, successful/top-level preferences and promotion thresholds remain unchanged.
 
 ## Header privacy and database upgrades
 
@@ -87,7 +103,7 @@ On open, migration **v4** logically removes legacy header values/examples from b
 
 If an upgrade fails, do not print the broken header JSON, force the schema version, bypass migration or resume live capture with the old value-retaining binary. To continue fresh, choose a **different, empty `SPECWATCH_HOME`**, leaving the failed store untouched. Contact the maintainer privately if historical sessions must be recovered; do not upload the database to a public issue.
 
-This header guarantee is not a universal secret scanner. Inferred enum strings, query/path observations, target URLs and generated files can still be sensitive. Raw JSON request/response bodies are buffered transiently for inference rather than stored as body transcripts. Use synthetic data where possible, keep stores/exports private and review artifacts before sharing.
+This header guarantee is not a universal secret scanner. Candidate enum strings retained in learning data/raw JSON or opt-in OpenAPI, query/path observations, target URLs and generated files can still be sensitive. Conservative OpenAPI is not a general-purpose sanitization pass. Raw JSON request/response bodies are buffered transiently for inference rather than stored as body transcripts. Use synthetic data where possible, keep stores/exports private and review artifacts before sharing.
 
 ## Agent analysis
 

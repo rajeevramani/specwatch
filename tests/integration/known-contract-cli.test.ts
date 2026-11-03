@@ -263,6 +263,7 @@ const without = (value: Record<string, unknown>, key: string) =>
 
 describe('known independent API contract through the real CLI', () => {
   const documents = new Map<string, Document>();
+  const enforcingDocuments = new Map<string, Document>();
   let report: any;
   beforeAll(async () => {
     expect(isAbsolute(CLI), 'SPECWATCH_TEST_CLI must be absolute').toBe(true);
@@ -383,11 +384,26 @@ describe('known independent API contract through the real CLI', () => {
       expect(sessions).toHaveLength(1);
       expect(sessions[0].status).toBe('completed');
       expect(sessions[0].sample_count).toBe(observations.length);
-      for (const version of ['3.1', '3.0'])
+      for (const version of ['3.1', '3.0']) {
         documents.set(
           version,
           await run(['export', sessions[0].id, '--json', '--openapi-version', version], home),
         );
+        enforcingDocuments.set(
+          version,
+          await run(
+            [
+              'export',
+              sessions[0].id,
+              '--json',
+              '--openapi-version',
+              version,
+              '--include-inferred-enums',
+            ],
+            home,
+          ),
+        );
+      }
       const spec = join(home, 'independent-api.json');
       writeFileSync(
         spec,
@@ -502,8 +518,8 @@ describe('known independent API contract through the real CLI', () => {
           check(doc, path, '/teams', value, false);
       }
     });
-    it('learns categorical code labels and nullable status without closing open/numeric codes', () => {
-      const doc = documents.get(version)!;
+    it('opt-in learns categorical code labels and nullable status without closing open/numeric codes', () => {
+      const doc = enforcingDocuments.get(version)!;
       for (const countryCode of ['AU', 'NZ'])
         for (const currencyCode of ['AUD', 'NZD'])
           for (const status of ['active', 'draft', null])

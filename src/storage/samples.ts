@@ -3,7 +3,8 @@
  * JSON fields are serialized at the repository boundary; callers receive typed objects.
  */
 import type Database from 'better-sqlite3';
-import type { Sample, InferredSchema, HeaderEntry } from '../types/index.js';
+import type { Sample, InferredSchema } from '../types/index.js';
+import { decodeHeaders, encodeHeaders } from '../headers/metadata.js';
 
 // ---------------------------------------------------------------------------
 // Row type returned by better-sqlite3
@@ -48,12 +49,8 @@ function rowToSample(row: SampleRow): Sample {
     responseSchema: row.response_schema
       ? (JSON.parse(row.response_schema) as InferredSchema)
       : undefined,
-    requestHeaders: row.request_headers
-      ? (JSON.parse(row.request_headers) as HeaderEntry[])
-      : undefined,
-    responseHeaders: row.response_headers
-      ? (JSON.parse(row.response_headers) as HeaderEntry[])
-      : undefined,
+    requestHeaders: decodeHeaders(row.request_headers),
+    responseHeaders: decodeHeaders(row.response_headers),
     capturedAt: row.captured_at,
     jsonrpcMethod: row.jsonrpc_method ?? undefined,
     jsonrpcTool: row.jsonrpc_tool ?? undefined,
@@ -98,8 +95,8 @@ export class SampleRepository {
         sample.queryParams != null ? JSON.stringify(sample.queryParams) : null,
         sample.requestSchema != null ? JSON.stringify(sample.requestSchema) : null,
         sample.responseSchema != null ? JSON.stringify(sample.responseSchema) : null,
-        sample.requestHeaders != null ? JSON.stringify(sample.requestHeaders) : null,
-        sample.responseHeaders != null ? JSON.stringify(sample.responseHeaders) : null,
+        encodeHeaders(sample.requestHeaders),
+        encodeHeaders(sample.responseHeaders),
         sample.capturedAt,
         sample.jsonrpcMethod ?? null,
         sample.jsonrpcTool ?? null,

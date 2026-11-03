@@ -24,9 +24,9 @@ export interface CapturedPair {
   url: string;
   /** HTTP response status code */
   statusCode: number;
-  /** Captured and redacted request headers */
+  /** Structural request headers */
   requestHeaders: HeaderEntry[] | undefined;
-  /** Captured and redacted response headers */
+  /** Structural response headers */
   responseHeaders: HeaderEntry[] | undefined;
   /**
    * Parsed request body JSON value, or undefined if:
@@ -50,6 +50,12 @@ export interface CapturedPair {
   responseBodySkipped: boolean;
   /** ISO 8601 timestamp of capture */
   capturedAt: string;
+}
+
+interface CapturedResponse {
+  body: unknown | undefined;
+  skipped: boolean;
+  headers: HeaderEntry[] | undefined;
 }
 
 /**
@@ -153,15 +159,14 @@ async function captureRequestBody(
  *
  * Returns a promise that resolves with the captured body after res.end().
  */
-function interceptResponseBodyLazy(
-  res: http.ServerResponse,
-): Promise<{ body: unknown | undefined; skipped: boolean }> {
+function interceptResponseBodyLazy(res: http.ServerResponse): Promise<CapturedResponse> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let total = 0;
     let oversize = false;
     let isJson = false;
     let contentTypeKnown = false;
+    let responseHeaders: HeaderEntry[] | undefined;
 
     const originalWrite = res.write.bind(res) as typeof res.write;
     const originalEnd = res.end.bind(res) as typeof res.end;
@@ -181,64 +186,52 @@ function interceptResponseBodyLazy(
       setContentType(ctStr);
     }
 
-    // Extract content-type from writeHead arguments (since they bypass res.getHeader)
-    function extractCtFromWriteHeadArgs(
-      reasonOrHeaders?: string | http.OutgoingHttpHeaders | http.OutgoingHttpHeaderNames,
-      maybeHeaders?: http.OutgoingHttpHeaders | http.OutgoingHttpHeaderNames,
-    ): string | undefined {
-      const hdrs =
-        typeof reasonOrHeaders === 'object' && reasonOrHeaders !== null
-          ? reasonOrHeaders
-          : maybeHeaders;
-      if (!hdrs) return undefined;
-      // Headers can be keyed by various casings
-      for (const [key, val] of Object.entries(hdrs)) {
-        if (key.toLowerCase() === 'content-type') {
-          if (typeof val === 'string') return val;
-          if (Array.isArray(val)) return val[0] as string;
-        }
-      }
-      return undefined;
-    }
-
-    // Intercept writeHead to detect content-type from headers
+    // Observe effective protocol headers on transient copies; retain metadata only.
     res.writeHead = function patchedWriteHead(
-      statusCode: number,
-      reasonOrHeaders?: string | http.OutgoingHttpHeaders | http.OutgoingHttpHeaderNames,
-      maybeHeaders?: http.OutgoingHttpHeaders | http.OutgoingHttpHeaderNames,
+      ...args: [
+        number,
+        (string | http.OutgoingHttpHeaders | http.OutgoingHttpHeader[])?,
+        (http.OutgoingHttpHeaders | http.OutgoingHttpHeader[])?,
+      ]
     ): http.ServerResponse {
-      // Restore original immediately
       res.writeHead = originalWriteHead;
-
-      // Extract content-type from the arguments BEFORE calling original
-      const ct = extractCtFromWriteHeadArgs(reasonOrHeaders, maybeHeaders);
-      if (ct) {
-        setContentType(ct);
+      // Forward first, outside the projection catch: preserve Node's argument
+      // count, return value and protocol errors, even if metadata capture fails.
+      const result = Reflect.apply(originalWriteHead, res, args) as http.ServerResponse;
+      try {
+        const effective: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+        const supplied = typeof args[1] === 'string' ? args[2] : (args[1] ?? args[2]);
+        if (Array.isArray(supplied)) {
+          const explicit = new Map<string, http.OutgoingHttpHeader[]>();
+          for (let i = 0; i + 1 < supplied.length; i += 2) {
+            const name = supplied[i];
+            if (typeof name !== 'string') continue;
+            const key = name.toLowerCase();
+            const values = explicit.get(key) ?? [];
+            values.push(supplied[i + 1]);
+            explicit.set(key, values);
+          }
+          for (const [name, values] of explicit) effective[name] = values.flat();
+        } else if (supplied) {
+          for (const [name, value] of Object.entries(supplied))
+            effective[name.toLowerCase()] = value;
+        }
+        // Node's final cache is authoritative when setHeader caused writeHead
+        // to cache explicit headers, including duplicate raw-array values.
+        for (const [name, value] of Object.entries(res.getHeaders()))
+          effective[name.toLowerCase()] = value;
+        const ct = effective['content-type'];
+        setContentType(typeof ct === 'string' ? ct : Array.isArray(ct) ? ct[0] : undefined);
+        responseHeaders = captureHeaders(effective);
+      } catch {
+        responseHeaders = undefined;
       }
-
-      // Call original
-      let result: http.ServerResponse;
-      if (typeof reasonOrHeaders === 'string') {
-        result = originalWriteHead(statusCode, reasonOrHeaders, maybeHeaders);
-      } else if (reasonOrHeaders !== undefined) {
-        result = originalWriteHead(statusCode, reasonOrHeaders as http.OutgoingHttpHeaders);
-      } else {
-        result = originalWriteHead(statusCode);
-      }
-
-      // If we didn't get it from args, try getHeader as fallback
-      if (!contentTypeKnown) {
-        detectContentType();
-      }
-
       return result;
     } as typeof res.writeHead;
 
     function accumulate(chunk: unknown, encoding?: BufferEncoding): void {
       if (!isJson || oversize) return;
-      const buf = Buffer.isBuffer(chunk)
-        ? chunk
-        : Buffer.from(chunk as string, encoding ?? 'utf8');
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string, encoding ?? 'utf8');
       total += buf.length;
       if (total > MAX_BODY_BYTES) {
         oversize = true;
@@ -281,10 +274,22 @@ function interceptResponseBodyLazy(
 
       // Compute result before restoring originals
       if (oversize) {
-        resolve({ body: undefined, skipped: true });
+        resolve({
+          body: undefined,
+          skipped: true,
+          get headers() {
+            return responseHeaders;
+          },
+        });
       } else {
         const combined = Buffer.concat(chunks);
-        resolve({ body: isJson ? tryParseJson(combined) : undefined, skipped: false });
+        resolve({
+          body: isJson ? tryParseJson(combined) : undefined,
+          skipped: false,
+          get headers() {
+            return responseHeaders;
+          },
+        });
       }
 
       // Restore originals
@@ -346,8 +351,11 @@ export async function captureRequestResponse(
   // Wait for the response to finish, then collect everything
   await finishPromise;
 
-  const { body: responseBody, skipped: responseBodySkipped } = await responseBodyPromise;
-  const responseHeaders = captureHeaders(res.getHeaders());
+  const {
+    body: responseBody,
+    skipped: responseBodySkipped,
+    headers: responseHeaders,
+  } = await responseBodyPromise;
 
   return {
     method: req.method ?? 'GET',

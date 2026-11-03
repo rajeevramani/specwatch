@@ -87,6 +87,23 @@ describe('classifyPattern', () => {
       'unknown',
     );
   });
+
+  it('classifies a repeated identical GET as a retry (redundant duplicate)', () => {
+    expect(classifyPattern('GET', '/products', 'GET', '/products', 50)).toBe('retry');
+  });
+
+  it('does NOT classify repeated identical writes as retry (may be distinct creates)', () => {
+    // Two identical POSTs can legitimately create two different resources;
+    // redundancy cannot be inferred from method+path alone.
+    expect(classifyPattern('POST', '/products', 'POST', '/products', 50)).toBe('unknown');
+    expect(classifyPattern('DELETE', '/products/{id}', 'DELETE', '/products/{id}', 50)).toBe(
+      'unknown',
+    );
+  });
+
+  it('does not classify different-path or different-method calls as retry', () => {
+    expect(classifyPattern('GET', '/products', 'GET', '/orders', 50)).toBe('unknown');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -144,14 +161,7 @@ describe('detectSequences', () => {
       undefined,
       'agent',
     );
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users',
-      '/users',
-      new Date().toISOString(),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users', '/users', new Date().toISOString());
 
     const result = detectSequences(db, session.id);
     expect(result.sequences).toEqual([]);
@@ -170,14 +180,7 @@ describe('detectSequences', () => {
     const base = Date.now();
 
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 0));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/42',
-      '/users/{userId}',
-      isoTime(base, 500),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/42', '/users/{userId}', isoTime(base, 500));
 
     const result = detectSequences(db, session.id);
     expect(result.sequences).toHaveLength(1);
@@ -256,39 +259,16 @@ describe('detectSequences', () => {
 
     // Three POST→GET verification loops
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 0));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/1',
-      '/users/{userId}',
-      isoTime(base, 500),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/1', '/users/{userId}', isoTime(base, 500));
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 2000));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/2',
-      '/users/{userId}',
-      isoTime(base, 2500),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/2', '/users/{userId}', isoTime(base, 2500));
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 4000));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/3',
-      '/users/{userId}',
-      isoTime(base, 4500),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/3', '/users/{userId}', isoTime(base, 4500));
 
     const result = detectSequences(db, session.id);
 
     // POST→GET appears 3 times, GET→POST appears 2 times (interleaved)
-    const postGet = result.sequences.find(
-      (s) => s.fromMethod === 'POST' && s.toMethod === 'GET',
-    );
+    const postGet = result.sequences.find((s) => s.fromMethod === 'POST' && s.toMethod === 'GET');
     expect(postGet).toBeDefined();
     expect(postGet!.count).toBe(3);
     expect(postGet!.pattern).toBe('verification_loop');
@@ -308,28 +288,12 @@ describe('detectSequences', () => {
 
     // Two POST→GET with delays of 200ms and 400ms → avg 300ms
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 0));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/1',
-      '/users/{userId}',
-      isoTime(base, 200),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/1', '/users/{userId}', isoTime(base, 200));
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 1000));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/2',
-      '/users/{userId}',
-      isoTime(base, 1400),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/2', '/users/{userId}', isoTime(base, 1400));
 
     const result = detectSequences(db, session.id);
-    const postGet = result.sequences.find(
-      (s) => s.fromMethod === 'POST' && s.toMethod === 'GET',
-    );
+    const postGet = result.sequences.find((s) => s.fromMethod === 'POST' && s.toMethod === 'GET');
     expect(postGet).toBeDefined();
     expect(postGet!.avgDelayMs).toBe(300);
   });
@@ -346,14 +310,7 @@ describe('detectSequences', () => {
 
     // Verification loop: POST → GET
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 0));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/1',
-      '/users/{userId}',
-      isoTime(base, 500),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/1', '/users/{userId}', isoTime(base, 500));
 
     // Create chain: POST parent → POST child
     insertSample(
@@ -374,14 +331,7 @@ describe('detectSequences', () => {
     );
 
     // Unknown: GET → DELETE
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/orders',
-      '/orders',
-      isoTime(base, 5000),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/orders', '/orders', isoTime(base, 5000));
     insertSample(
       sampleRepo,
       session.id,
@@ -426,23 +376,9 @@ describe('detectSequences', () => {
 
     // 2x POST→GET
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 1000));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/1',
-      '/users/{userId}',
-      isoTime(base, 1500),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/1', '/users/{userId}', isoTime(base, 1500));
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 3000));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/2',
-      '/users/{userId}',
-      isoTime(base, 3500),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/2', '/users/{userId}', isoTime(base, 3500));
 
     const result = detectSequences(db, session.id);
     expect(result.sequences[0].count).toBeGreaterThanOrEqual(result.sequences[1].count);
@@ -465,21 +401,21 @@ describe('classifyJsonRpcPattern', () => {
   });
 
   it('classifies create→query as verification_loop', () => {
-    expect(
-      classifyJsonRpcPattern('tools/call:create_cluster', 'tools/call:get_cluster'),
-    ).toBe('verification_loop');
+    expect(classifyJsonRpcPattern('tools/call:create_cluster', 'tools/call:get_cluster')).toBe(
+      'verification_loop',
+    );
   });
 
   it('classifies update→read as verification_loop', () => {
-    expect(
-      classifyJsonRpcPattern('tools/call:update_user', 'tools/call:get_user'),
-    ).toBe('verification_loop');
+    expect(classifyJsonRpcPattern('tools/call:update_user', 'tools/call:get_user')).toBe(
+      'verification_loop',
+    );
   });
 
   it('classifies unrelated tools as unknown', () => {
-    expect(
-      classifyJsonRpcPattern('tools/call:create_cluster', 'tools/call:list_users'),
-    ).toBe('unknown');
+    expect(classifyJsonRpcPattern('tools/call:create_cluster', 'tools/call:list_users')).toBe(
+      'unknown',
+    );
   });
 
   it('classifies initialize→tools/list as unknown', () => {
@@ -812,14 +748,7 @@ describe('detectSequences with JSON-RPC', () => {
     const base = Date.now();
 
     insertSample(sampleRepo, session.id, 'POST', '/users', '/users', isoTime(base, 0));
-    insertSample(
-      sampleRepo,
-      session.id,
-      'GET',
-      '/users/1',
-      '/users/{userId}',
-      isoTime(base, 500),
-    );
+    insertSample(sampleRepo, session.id, 'GET', '/users/1', '/users/{userId}', isoTime(base, 500));
 
     const result = detectSequences(db, session.id);
     expect(result.sequences).toHaveLength(1);

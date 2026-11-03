@@ -1,7 +1,7 @@
 // Unit tests for header filtering and redaction — owned by Proxy Engineer
 
 import { describe, it, expect } from 'vitest';
-import { captureHeaders, redactHeader, isInfrastructureHeader } from './headers.js';
+import { captureHeaders, isInfrastructureHeader } from './headers.js';
 
 // ---------------------------------------------------------------------------
 // isInfrastructureHeader
@@ -74,52 +74,28 @@ describe('isInfrastructureHeader', () => {
 // redactHeader
 // ---------------------------------------------------------------------------
 
-describe('redactHeader', () => {
-  it('redacts Authorization Bearer token', () => {
-    expect(redactHeader('authorization', 'Bearer abc123xyz')).toBe('Bearer ***');
-  });
-
-  it('redacts Authorization Basic credential', () => {
-    expect(redactHeader('Authorization', 'Basic dXNlcjpwYXNz')).toBe('Basic ***');
-  });
-
-  it('redacts Authorization Token scheme', () => {
-    expect(redactHeader('authorization', 'Token secret-token')).toBe('Token ***');
-  });
-
-  it('redacts Authorization with no scheme prefix', () => {
-    expect(redactHeader('authorization', 'rawsecret')).toBe('***');
-  });
-
-  it('redacts Cookie header value', () => {
-    expect(redactHeader('cookie', 'session=abc123; token=xyz')).toBe('***');
-  });
-
-  it('redacts X-API-Key header value', () => {
-    expect(redactHeader('x-api-key', 'my-secret-key')).toBe('***');
-  });
-
-  it('returns original value for non-sensitive header', () => {
-    expect(redactHeader('content-type', 'application/json')).toBe('application/json');
-  });
-
-  it('returns original value for Accept header', () => {
-    expect(redactHeader('accept', 'application/json')).toBe('application/json');
-  });
-
-  it('is case-insensitive for Authorization', () => {
-    expect(redactHeader('Authorization', 'Bearer token123')).toBe('Bearer ***');
-  });
-
-  it('is case-insensitive for Cookie', () => {
-    expect(redactHeader('Cookie', 'session=abc')).toBe('***');
-  });
-
-  it('is case-insensitive for X-API-Key', () => {
-    expect(redactHeader('X-API-Key', 'key-value')).toBe('***');
+describe('structural replacement for value redaction', () => {
+  it.each([
+    ['authorization', 'Bearer abc123xyz', ['bearer']],
+    ['Authorization', 'Basic dXNlcjpwYXNz', ['basic']],
+    ['authorization', 'Token secret-token', undefined],
+    ['authorization', 'rawsecret', undefined],
+    ['cookie', 'session=abc123; token=xyz', undefined],
+    ['x-api-key', 'my-secret-key', undefined],
+    ['content-type', 'application/json', undefined],
+    ['accept', 'application/json', undefined],
+    ['Authorization', 'Bearer token123', ['bearer']],
+    ['Cookie', 'session=abc', undefined],
+    ['X-API-Key', 'key-value', undefined],
+  ])('retains only structural metadata for %s (%s)', (name, value, authSchemes) => {
+    const result = captureHeaders({ [name as string]: value });
+    expect(result).toEqual([authSchemes ? { name: (name as string).toLowerCase(), authSchemes } : { name: (name as string).toLowerCase() }]);
+    expect(JSON.stringify(result)).not.toContain(value);
+    expect(result![0]).not.toHaveProperty('example');
   });
 });
 
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // captureHeaders
 // ---------------------------------------------------------------------------
@@ -155,7 +131,7 @@ describe('captureHeaders', () => {
       authorization: 'Bearer secret-token',
     });
     expect(result).toBeDefined();
-    expect(result![0]).toEqual({ name: 'authorization', example: 'Bearer ***' });
+    expect(result![0]).toEqual({ name: 'authorization', authSchemes: ['bearer'] });
   });
 
   it('redacts Cookie header', () => {
@@ -163,7 +139,7 @@ describe('captureHeaders', () => {
       cookie: 'session=abc',
     });
     expect(result).toBeDefined();
-    expect(result![0]).toEqual({ name: 'cookie', example: '***' });
+    expect(result![0]).toEqual({ name: 'cookie' });
   });
 
   it('redacts X-API-Key header', () => {
@@ -171,7 +147,7 @@ describe('captureHeaders', () => {
       'x-api-key': 'my-secret',
     });
     expect(result).toBeDefined();
-    expect(result![0]).toEqual({ name: 'x-api-key', example: '***' });
+    expect(result![0]).toEqual({ name: 'x-api-key' });
   });
 
   it('filters out hop-by-hop headers while keeping application headers', () => {
@@ -204,12 +180,12 @@ describe('captureHeaders', () => {
     expect(names).toContain('content-type');
   });
 
-  it('handles array values by using the first element', () => {
+  it('records array-valued header presence without keeping any element', () => {
     const result = captureHeaders({
       'set-cookie': ['session=abc; Path=/', 'token=xyz; Path=/'],
     });
     expect(result).toBeDefined();
-    expect(result![0].example).toBe('session=abc; Path=/');
+    expect(result).toEqual([{ name: 'set-cookie' }]);
   });
 
   it('skips undefined values', () => {
@@ -243,12 +219,11 @@ describe('captureHeaders', () => {
       'x-forwarded-for': '10.0.0.1',
     });
     expect(result).toBeDefined();
-    const map = Object.fromEntries(result!.map((h) => [h.name, h.example]));
-    expect(map['authorization']).toBe('Bearer ***');
-    expect(map['content-type']).toBe('application/json');
-    expect(map['accept']).toBe('application/json');
-    expect(map['x-request-id']).toBe('abc-123');
-    expect(map['connection']).toBeUndefined();
-    expect(map['x-forwarded-for']).toBeUndefined();
+    expect(result).toEqual([
+      { name: 'accept' }, { name: 'authorization', authSchemes: ['bearer'] },
+      { name: 'content-type' }, { name: 'x-request-id' },
+    ]);
+    expect(JSON.stringify(result)).not.toContain('jwt.token.here');
+    expect(JSON.stringify(result)).not.toContain('abc-123');
   });
 });

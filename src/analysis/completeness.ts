@@ -62,12 +62,12 @@ function getSuccessResponseSchema(
 ): InferredSchema | undefined {
   if (!schema.responseSchemas) return undefined;
 
-  // Prefer 200, then 201, then first 2xx
+  // Prefer 200, then 201, then first 2xx with a body. null = no-body status code (204, etc.)
   if (schema.responseSchemas['200']) return schema.responseSchemas['200'];
   if (schema.responseSchemas['201']) return schema.responseSchemas['201'];
 
   for (const [code, responseSchema] of Object.entries(schema.responseSchemas)) {
-    if (code.startsWith('2')) return responseSchema;
+    if (code.startsWith('2') && responseSchema !== null) return responseSchema;
   }
   return undefined;
 }

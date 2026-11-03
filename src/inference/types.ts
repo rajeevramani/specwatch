@@ -111,9 +111,9 @@ export interface Sample {
   requestSchema?: InferredSchema;
   /** Inferred schema of the response body (null if no body) */
   responseSchema?: InferredSchema;
-  /** Captured and redacted request headers */
+  /** Structural request headers */
   requestHeaders?: HeaderEntry[];
-  /** Captured and redacted response headers */
+  /** Structural response headers */
   responseHeaders?: HeaderEntry[];
   /** ISO 8601 timestamp of when this sample was captured */
   capturedAt: string;
@@ -123,12 +123,12 @@ export interface Sample {
   jsonrpcTool?: string;
 }
 
-/** A captured HTTP header with name and example value */
+/** Structural HTTP metadata only; never header values or examples. */
 export interface HeaderEntry {
-  /** Header name (e.g., "Content-Type") */
+  /** Valid HTTP token, canonicalized to lowercase. */
   name: string;
-  /** Example value (redacted for sensitive headers) */
-  example: string;
+  /** Closed classifications, only meaningful for authorization. */
+  authSchemes?: Array<'bearer' | 'basic'>;
 }
 
 // === Aggregation Types ===
@@ -149,8 +149,12 @@ export interface AggregatedSchema {
   snapshot: number;
   /** Merged request body schema */
   requestSchema?: InferredSchema;
-  /** Response schemas keyed by status code (e.g., {"200": {...}, "404": {...}}) */
-  responseSchemas?: Record<string, InferredSchema>;
+  /**
+   * Response schemas keyed by status code (e.g., {"200": {...}, "404": {...}}).
+   * A `null` value indicates the status code was observed but the response had
+   * no body (e.g. `204 No Content`).
+   */
+  responseSchemas?: Record<string, InferredSchema | null>;
   /** Merged request headers */
   requestHeaders?: HeaderEntry[];
   /** Merged response headers */
@@ -225,4 +229,6 @@ export interface ExportOptions {
   description?: string;
   /** Include x-specwatch-* metadata extensions */
   includeMetadata?: boolean;
+  /** Server URLs for the OpenAPI servers block (typically the proxied target URL) */
+  servers?: string[];
 }

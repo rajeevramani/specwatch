@@ -10,13 +10,204 @@
  */
 
 import type { Sample, InferredSchema, HeaderEntry, AggregatedSchema } from '../types/index.js';
+import { projectHeaders } from '../headers/metadata.js';
 import type { Database } from '../storage/database.js';
 import { mergeSchemas } from '../inference/merge.js';
+import { isIdentifierLikePathSegment } from '../inference/path-normalizer.js';
 import { calculateSchemaConfidence } from './confidence.js';
 import { detectBreakingChanges } from './diff.js';
 import { SampleRepository } from '../storage/samples.js';
 import { SessionRepository } from '../storage/sessions.js';
 import { AggregatedSchemaRepository } from '../storage/schemas.js';
+
+// ============================================================
+// Path Unification
+// ============================================================
+
+interface EndpointEntry {
+  method: string;
+  path: string;
+  statusGroups: Map<
+    string,
+    {
+      requestSchema?: InferredSchema;
+      responseSchema?: InferredSchema;
+      samples: Sample[];
+    }
+  >;
+  allSamples: Sample[];
+  requestHeaders: (HeaderEntry[] | undefined)[];
+  responseHeaders: (HeaderEntry[] | undefined)[];
+}
+
+/**
+ * Pluralized parent segment → singular + Id.
+ * "owners" → "ownerId", "users" → "userId", "events" → "eventId".
+ * Falls back to "{parent}Id" if the parent isn't a known plural.
+ */
+function paramNameFromParent(parent: string): string {
+  const lower = parent.toLowerCase();
+  let singular = lower;
+  // Reuse a small subset of the plural map from path-normalizer for parent→singular
+  if (lower.endsWith('ies') && lower.length > 3) singular = lower.slice(0, -3) + 'y';
+  else if (lower.endsWith('ses') && lower.length > 3) singular = lower.slice(0, -2);
+  else if (lower.endsWith('s') && lower.length > 2) singular = lower.slice(0, -1);
+  return singular + 'Id';
+}
+
+/**
+ * Merge endpoint entry `from` into `into`. Combines status groups, samples,
+ * headers. Used during path unification.
+ */
+function mergeEndpointEntry(into: EndpointEntry, from: EndpointEntry): void {
+  for (const [statusCode, fromGroup] of from.statusGroups) {
+    const intoGroup = into.statusGroups.get(statusCode);
+    if (intoGroup === undefined) {
+      into.statusGroups.set(statusCode, fromGroup);
+    } else {
+      // Merge schemas
+      if (fromGroup.requestSchema !== undefined) {
+        intoGroup.requestSchema =
+          intoGroup.requestSchema === undefined
+            ? fromGroup.requestSchema
+            : mergeSchemas(intoGroup.requestSchema, fromGroup.requestSchema);
+      }
+      if (fromGroup.responseSchema !== undefined) {
+        intoGroup.responseSchema =
+          intoGroup.responseSchema === undefined
+            ? fromGroup.responseSchema
+            : mergeSchemas(intoGroup.responseSchema, fromGroup.responseSchema);
+      }
+      intoGroup.samples = intoGroup.samples.concat(fromGroup.samples);
+    }
+  }
+  into.allSamples = into.allSamples.concat(from.allSamples);
+  into.requestHeaders = into.requestHeaders.concat(from.requestHeaders);
+  into.responseHeaders = into.responseHeaders.concat(from.responseHeaders);
+}
+
+/**
+ * Pick a representative 2xx response schema for fingerprint-based comparison.
+ * Returns undefined if the entry has no 2xx responses at all.
+ */
+function pick2xxResponseSchema(entry: EndpointEntry): InferredSchema | undefined {
+  for (const [statusCode, group] of entry.statusGroups) {
+    const code = parseInt(statusCode, 10);
+    if (code >= 200 && code < 300 && group.responseSchema !== undefined) {
+      return group.responseSchema;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Unify sibling endpoint paths whose differing leaf segment looks like a value
+ * for the same parameter. Two cases:
+ *
+ *   1. **Fold-into-existing-param**: a parameterized sibling already exists
+ *      (e.g. /pets/{petId}) and the literal-leaf endpoint (e.g. /pets/abc)
+ *      has only 4xx/5xx responses — likely an invalid call to the same
+ *      endpoint. Fold the literal into the param sibling.
+ *
+ *   2. **Parameterize-recognized-legacy-values**: no param sibling exists,
+ *      and ≥2 literal leaves have capture-recognized ID/value syntax plus
+ *      matching 2xx response shapes. This serves legacy/manual normalized
+ *      rows; fresh captures already normalize recognized values. Alphabetic
+ *      siblings stay literal even when their response shapes match.
+ *
+ * Modifies `endpointMap` in place. Path normalization at sample-capture time
+ * is per-path; unification is the cross-path pass that finishes the job.
+ */
+export function unifyEndpointPaths(endpointMap: Map<string, EndpointEntry>): void {
+  // Group entries by (method, parent path). Parent = path with last segment removed.
+  const groupsByParent = new Map<string, Array<{ key: string; entry: EndpointEntry }>>();
+  for (const [key, entry] of endpointMap) {
+    const segments = entry.path.split('/');
+    if (segments.length < 3) continue; // need at least /parent/leaf
+    const lastSeg = segments[segments.length - 1];
+    const parentPath = segments.slice(0, -1).join('/');
+    const groupKey = `${entry.method} ${parentPath}`;
+    if (!groupsByParent.has(groupKey)) groupsByParent.set(groupKey, []);
+    groupsByParent.get(groupKey)!.push({ key, entry });
+    void lastSeg; // referenced below per-group
+  }
+
+  for (const members of groupsByParent.values()) {
+    if (members.length < 2) continue;
+
+    // Identify any already-parameterized member (last segment is {param})
+    const paramMember = members.find(({ entry }) => {
+      const last = entry.path.split('/').pop()!;
+      return last.startsWith('{') && last.endsWith('}');
+    });
+
+    if (paramMember !== undefined) {
+      // Case 1: fold literal-leaf siblings into the param member when they
+      // have no 2xx responses (i.e. they're invalid-input calls to the same
+      // logical endpoint).
+      for (const { key, entry } of members) {
+        if (entry === paramMember.entry) continue;
+        const last = entry.path.split('/').pop()!;
+        if (last.startsWith('{')) continue; // already a different param
+        const has2xx = Array.from(entry.statusGroups.keys()).some((sc) => {
+          const code = parseInt(sc, 10);
+          return code >= 200 && code < 300;
+        });
+        if (has2xx) continue; // legitimate distinct endpoint, leave alone
+        mergeEndpointEntry(paramMember.entry, entry);
+        endpointMap.delete(key);
+      }
+      continue;
+    }
+
+    // Case 2: only recognized legacy/manual literal values can be candidates.
+    // Response shape alone cannot distinguish resource names from identifiers.
+    const literalMembers = members.filter(({ entry }) => {
+      const last = entry.path.split('/').pop()!;
+      return isIdentifierLikePathSegment(last);
+    });
+    if (literalMembers.length < 2) continue;
+
+    const byShape = new Map<string, Array<{ key: string; entry: EndpointEntry }>>();
+    for (const m of literalMembers) {
+      const responseSchema = pick2xxResponseSchema(m.entry);
+      if (responseSchema === undefined) continue; // need a 2xx shape to unify on
+      const fp = computeSchemaFingerprint(responseSchema);
+      if (!byShape.has(fp)) byShape.set(fp, []);
+      byShape.get(fp)!.push(m);
+    }
+
+    for (const partition of byShape.values()) {
+      if (partition.length < 2) continue;
+
+      // Unified path: replace last segment with a parameter named from parent
+      const firstSegments = partition[0].entry.path.split('/');
+      const parentSeg = firstSegments[firstSegments.length - 2];
+      const paramName = paramNameFromParent(parentSeg);
+
+      const unifiedSegments = firstSegments.slice(0, -1).concat(`{${paramName}}`);
+      const unifiedPath = unifiedSegments.join('/');
+      const newKey = `${partition[0].entry.method} ${unifiedPath}`;
+
+      // Build merged entry from partition[0], then fold the rest in
+      const merged: EndpointEntry = {
+        method: partition[0].entry.method,
+        path: unifiedPath,
+        statusGroups: new Map(partition[0].entry.statusGroups),
+        allSamples: [...partition[0].entry.allSamples],
+        requestHeaders: [...partition[0].entry.requestHeaders],
+        responseHeaders: [...partition[0].entry.responseHeaders],
+      };
+      for (let i = 1; i < partition.length; i++) {
+        mergeEndpointEntry(merged, partition[i].entry);
+      }
+
+      // Remove originals; install unified
+      for (const m of partition) endpointMap.delete(m.key);
+      endpointMap.set(newKey, merged);
+    }
+  }
+}
 
 // ============================================================
 // Task 4.1 — Sample Grouping
@@ -221,6 +412,20 @@ export function calculateRequiredFields(
   totalSamples: number,
   httpMethod?: string,
 ): InferredSchema {
+  if (schema.oneOf !== undefined) {
+    return {
+      ...schema,
+      oneOf: schema.oneOf.map((variant) =>
+        calculateRequiredFields(variant, variant.stats.presenceCount, httpMethod),
+      ),
+    };
+  }
+  if (schema.type === 'array' && schema.items !== undefined) {
+    return {
+      ...schema,
+      items: calculateRequiredFields(schema.items, schema.items.stats.presenceCount, httpMethod),
+    };
+  }
   if (schema.type !== 'object' || schema.properties === undefined) {
     return schema;
   }
@@ -234,26 +439,17 @@ export function calculateRequiredFields(
   for (const [fieldName, fieldSchema] of Object.entries(schema.properties)) {
     // A field is required if it was present in 100% of samples
     // (but never for PATCH requests — partial update semantics)
-    if (!isPatch && fieldSchema.stats.presenceCount === totalSamples) {
+    if (!isPatch && totalSamples > 0 && fieldSchema.stats.presenceCount === totalSamples) {
       required.push(fieldName);
     }
 
-    // Recurse into nested objects (pass httpMethod to propagate PATCH semantics)
-    let updatedFieldSchema = fieldSchema;
-    if (fieldSchema.type === 'object' && fieldSchema.properties !== undefined) {
-      // For nested objects, use the field's presenceCount as the total
-      // (only samples that had this field count toward nested required)
-      updatedFieldSchema = calculateRequiredFields(
-        fieldSchema,
-        fieldSchema.stats.presenceCount,
-        httpMethod,
-      );
-    } else if (fieldSchema.type === 'array' && fieldSchema.items !== undefined) {
-      const updatedItems = calculateRequiredFields(fieldSchema.items, totalSamples, httpMethod);
-      updatedFieldSchema = { ...fieldSchema, items: updatedItems };
-    }
-
-    updatedProperties[fieldName] = updatedFieldSchema;
+    // Each nested object population is conditional on that value being observed;
+    // array items and union alternatives recurse using their own populations.
+    updatedProperties[fieldName] = calculateRequiredFields(
+      fieldSchema,
+      fieldSchema.stats.presenceCount,
+      httpMethod,
+    );
   }
 
   // Sort required fields alphabetically (per spec)
@@ -270,24 +466,140 @@ export function calculateRequiredFields(
 // Enum Inference
 // ============================================================
 
+// Field names that almost never represent enums even with low observed cardinality.
+// Used to suppress over-eager enum inference for IDs, names, versions, identifiers,
+// free-text search inputs, and continuous numerics echoed as strings.
+const NON_ENUM_FIELD_NAMES = new Set([
+  'id',
+  'name',
+  'title',
+  'description',
+  'slug',
+  'username',
+  'firstname',
+  'lastname',
+  'fullname',
+  'displayname',
+  'email',
+  'version',
+  'sku',
+  'code',
+  'hash',
+  'token',
+  'secret',
+  'apikey',
+  'url',
+  'uri',
+  'href',
+  'path',
+  'message',
+  'comment',
+  'note',
+  'bio',
+  'summary',
+  'label',
+  // Free-text query inputs — almost always continuous, never enum
+  'q',
+  'query',
+  'search',
+  'filter',
+  'term',
+  'keyword',
+  'keywords',
+  // Numeric/quantitative — even when echoed as strings (e.g. query params)
+  'price',
+  'amount',
+  'cost',
+  'fee',
+  'value',
+  'total',
+  'count',
+  'size',
+  'limit',
+  'offset',
+  'page',
+  'minprice',
+  'maxprice',
+  'min',
+  'max',
+]);
+
+const NON_ENUM_FIELD_SUFFIXES = [
+  'id',
+  '_id',
+  'name',
+  'url',
+  'uri',
+  'token',
+  'hash',
+  'price',
+  'amount',
+  'cost',
+  'fee',
+  'value',
+  'count',
+  'size',
+];
+
+const UUID_LIKE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const SEMVER_LIKE = /^\d+\.\d+(\.\d+)?([-+]\S*)?$/;
+const URL_LIKE = /^https?:\/\//i;
+const PATH_LIKE = /^\/[\w-]/;
+const HEX_LONG = /^[0-9a-f]{16,}$/i;
+
+function fieldNameLooksNonEnum(fieldName: string): boolean {
+  const lower = fieldName.toLowerCase();
+  if (NON_ENUM_FIELD_NAMES.has(lower)) return true;
+  return NON_ENUM_FIELD_SUFFIXES.some((suffix) => lower.endsWith(suffix) && lower !== suffix);
+}
+
+function valuesLookNonEnum(values: string[]): boolean {
+  // If every value parses as a number, treat as continuous quantity rather than
+  // enum. Catches numeric query params (price, count, etc.) echoed as strings.
+  if (values.length > 0 && values.every((v) => v.length > 0 && !Number.isNaN(Number(v)))) {
+    return true;
+  }
+  for (const v of values) {
+    // Free-form text — enums are usually single tokens
+    if (v.length > 32) return true;
+    if (/\s/.test(v)) return true;
+    // ID-like patterns
+    if (UUID_LIKE.test(v)) return true;
+    if (HEX_LONG.test(v)) return true;
+    // Versions, URLs, paths
+    if (SEMVER_LIKE.test(v)) return true;
+    if (URL_LIKE.test(v)) return true;
+    if (PATH_LIKE.test(v)) return true;
+  }
+  return false;
+}
+
 /**
  * Recursively walk a schema and promote string fields with low cardinality
  * to enum constraints. A field qualifies if:
  *   - It has _observedValues with ≤10 distinct values
  *   - totalSamples ≥ 10
+ *   - Field name does not look like an identifier/name (id, name, sku, version, etc.)
+ *   - Observed values do not look like UUIDs, URLs, paths, semver, or free text
  *
  * After processing, _observedValues is cleared (it's internal tracking only).
  *
  * @param schema - The schema to process
  * @param totalSamples - Total samples for this endpoint group
+ * @param fieldName - Name of the property holding this schema (when applicable),
+ *                    used for the field-name heuristic
  * @returns Schema with enum annotations and _observedValues stripped
  */
-export function inferEnums(schema: InferredSchema, totalSamples: number): InferredSchema {
+export function inferEnums(
+  schema: InferredSchema,
+  totalSamples: number,
+  fieldName?: string,
+): InferredSchema {
   // Handle oneOf: recurse into each variant
   if (schema.oneOf !== undefined) {
     return {
       ...schema,
-      oneOf: schema.oneOf.map((v) => inferEnums(v, totalSamples)),
+      oneOf: schema.oneOf.map((v) => inferEnums(v, totalSamples, fieldName)),
       _observedValues: undefined,
     };
   }
@@ -301,7 +613,8 @@ export function inferEnums(schema: InferredSchema, totalSamples: number): Inferr
       totalSamples >= 10
     ) {
       const unique = [...new Set(result._observedValues)];
-      if (unique.length <= 10) {
+      const fieldExempt = fieldName !== undefined && fieldNameLooksNonEnum(fieldName);
+      if (unique.length <= 10 && !fieldExempt && !valuesLookNonEnum(unique)) {
         result.enum = unique.sort();
       }
     }
@@ -309,18 +622,18 @@ export function inferEnums(schema: InferredSchema, totalSamples: number): Inferr
     return result;
   }
 
-  // Object: recurse into properties
+  // Object: recurse into properties, passing each property name through
   if (schema.type === 'object' && schema.properties !== undefined) {
     const updatedProperties: Record<string, InferredSchema> = {};
     for (const [key, propSchema] of Object.entries(schema.properties)) {
-      updatedProperties[key] = inferEnums(propSchema, totalSamples);
+      updatedProperties[key] = inferEnums(propSchema, totalSamples, key);
     }
     return { ...schema, properties: updatedProperties };
   }
 
-  // Array: recurse into items
+  // Array: recurse into items under the same property context.
   if (schema.type === 'array' && schema.items !== undefined) {
-    return { ...schema, items: inferEnums(schema.items, totalSamples) };
+    return { ...schema, items: inferEnums(schema.items, totalSamples, fieldName) };
   }
 
   return schema;
@@ -333,7 +646,7 @@ export function inferEnums(schema: InferredSchema, totalSamples: number): Inferr
 /**
  * Merge arrays of headers from multiple samples into a deduplicated list.
  * - Deduplicates by name (case-insensitive)
- * - Keeps the first example value seen for each header name
+ * - Unions known authorization schemes and discards all unknown fields
  * - Sorts alphabetically by header name
  * - Returns undefined for empty results
  *
@@ -343,25 +656,7 @@ export function inferEnums(schema: InferredSchema, totalSamples: number): Inferr
 export function mergeHeaders(
   headerArrays: (HeaderEntry[] | undefined)[],
 ): HeaderEntry[] | undefined {
-  // Map from lowercase name to the first HeaderEntry seen
-  const seen = new Map<string, HeaderEntry>();
-
-  for (const headers of headerArrays) {
-    if (headers === undefined) continue;
-    for (const header of headers) {
-      const lowerName = header.name.toLowerCase();
-      if (!seen.has(lowerName)) {
-        seen.set(lowerName, header);
-      }
-    }
-  }
-
-  if (seen.size === 0) return undefined;
-
-  // Sort alphabetically by the original header name (case-insensitive)
-  return Array.from(seen.values()).sort((a, b) =>
-    a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
-  );
+  return projectHeaders(headerArrays.flatMap((headers) => headers ?? []));
 }
 
 // ============================================================
@@ -406,12 +701,21 @@ export function mergeQueryParams(samples: Sample[]): Record<string, string[]> | 
  * → { userId: ["123"], orderId: ["456"] }
  *
  * @param samples - Samples sharing the same normalized path
+ * @param explicitTemplate - Override the template inferred from samples[0].normalizedPath.
+ *                           Required when path unification has rewritten the endpoint
+ *                           template (e.g. /owners/owner_alice + /owners/owner_bob →
+ *                           /owners/{ownerId}) — the samples still carry their original
+ *                           per-sample normalizedPath but should be matched against the
+ *                           unified template.
  * @returns Map of param name → unique observed values, or undefined if no path params
  */
-export function collectPathParamValues(samples: Sample[]): Record<string, string[]> | undefined {
+export function collectPathParamValues(
+  samples: Sample[],
+  explicitTemplate?: string,
+): Record<string, string[]> | undefined {
   if (samples.length === 0) return undefined;
 
-  const template = samples[0].normalizedPath;
+  const template = explicitTemplate ?? samples[0].normalizedPath;
   const templateSegments = template.split('/');
 
   // Find param positions: indices where segment matches {paramName}
@@ -621,14 +925,36 @@ export function runAggregation(
       }
     }
 
+    // Cross-path unification: fold sibling endpoints whose differing leaf
+    // segment is the same logical parameter. Per-sample path normalization
+    // is per-path; this is the cross-path pass that finishes it.
+    unifyEndpointPaths(endpointMap);
+
     // Collapse into one aggregated schema per (method, path)
     const aggregated: AggregatedSchema[] = [];
     const now = new Date().toISOString();
 
     for (const [, endpoint] of endpointMap) {
-      // Merge request schemas across all status codes (usually same)
+      // Merge request schemas only from successful (2xx) status groups.
+      // 4xx/5xx samples represent invalid client input by definition — including
+      // them in request-body inference drops required fields below 100% presence
+      // and contradicts the API contract. Falls back to all groups if no 2xx
+      // samples exist (so endpoints observed only via errors still get a schema).
+      const successGroups = Array.from(endpoint.statusGroups.entries()).filter(
+        ([statusCode]) => {
+          const code = parseInt(statusCode, 10);
+          return code >= 200 && code < 300;
+        },
+      );
+      const requestGroups =
+        successGroups.length > 0 ? successGroups : Array.from(endpoint.statusGroups.entries());
+      const requestSampleCount = requestGroups.reduce(
+        (sum, [, group]) => sum + group.samples.length,
+        0,
+      );
+
       let requestSchema: InferredSchema | undefined;
-      for (const [, group] of endpoint.statusGroups) {
+      for (const [, group] of requestGroups) {
         if (group.requestSchema !== undefined) {
           if (requestSchema === undefined) {
             requestSchema = group.requestSchema;
@@ -638,19 +964,21 @@ export function runAggregation(
         }
       }
 
-      // Calculate required fields on request schema
-      // Pass HTTP method so PATCH requests get no required fields (partial update semantics)
+      // Calculate required fields on request schema using only the success-sample
+      // count, so a field present in all 2xx samples is correctly marked required
+      // even when error samples lack it.
       if (requestSchema) {
         requestSchema = calculateRequiredFields(
           requestSchema,
-          endpoint.allSamples.length,
+          requestSampleCount,
           endpoint.method,
         );
-        requestSchema = inferEnums(requestSchema, endpoint.allSamples.length);
+        requestSchema = inferEnums(requestSchema, requestSampleCount);
       }
 
-      // Build response_schemas map: statusCode → schema
-      const responseSchemas: Record<string, InferredSchema> = {};
+      // Build response_schemas map: statusCode → schema (or null for no-body responses
+      // like 204, so the export still emits the status code).
+      const responseSchemas: Record<string, InferredSchema | null> = {};
       for (const [statusCode, group] of endpoint.statusGroups) {
         if (group.responseSchema !== undefined) {
           let withRequired = calculateRequiredFields(
@@ -659,6 +987,11 @@ export function runAggregation(
           );
           withRequired = inferEnums(withRequired, group.samples.length);
           responseSchemas[statusCode] = withRequired;
+        } else if (group.samples.length > 0) {
+          // Status code was observed in the wire traffic but the response had no
+          // body (e.g. 204 No Content, 304 Not Modified). Record null so the
+          // status code is preserved in the export.
+          responseSchemas[statusCode] = null;
         }
       }
 
@@ -669,8 +1002,20 @@ export function runAggregation(
       // Merge query parameters
       const queryParams = mergeQueryParams(endpoint.allSamples);
 
-      // Collect path parameter values for type inference
-      const pathParamValues = collectPathParamValues(endpoint.allSamples);
+      // Collect path parameter values for type inference. Pass the (possibly
+      // unified) endpoint path explicitly — samples retain their per-sample
+      // normalizedPath which can lag behind cross-path unification.
+      //
+      // Use only 2xx samples: 4xx samples carry deliberately invalid path
+      // values (e.g. /pets/abc folded in from a 400 case) which would
+      // contaminate the type-narrowing heuristic (all-numeric → integer).
+      const successPathSamples = endpoint.allSamples.filter((s) => {
+        if (s.statusCode === undefined) return false;
+        return s.statusCode >= 200 && s.statusCode < 300;
+      });
+      const pathParamSamples =
+        successPathSamples.length > 0 ? successPathSamples : endpoint.allSamples;
+      const pathParamValues = collectPathParamValues(pathParamSamples, endpoint.path);
 
       // Count unique response shapes for completeness indicator
       const uniqueResponseShapes = countUniqueResponseShapes(endpoint.allSamples);

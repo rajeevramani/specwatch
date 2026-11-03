@@ -6,6 +6,7 @@
  */
 
 import type { AggregatedSchema } from '../types/index.js';
+import { projectHeaders } from '../headers/metadata.js';
 
 /**
  * Serialize a plain object to JSON with 2-space indentation.
@@ -37,8 +38,8 @@ export function buildJsonExport(schemas: AggregatedSchema[]): Record<string, unk
       confidenceScore: schema.confidenceScore,
       requestSchema: schema.requestSchema,
       responseSchemas: schema.responseSchemas,
-      requestHeaders: schema.requestHeaders,
-      responseHeaders: schema.responseHeaders,
+      requestHeaders: projectHeaders(schema.requestHeaders),
+      responseHeaders: projectHeaders(schema.responseHeaders),
       breakingChanges: schema.breakingChanges,
       firstObserved: schema.firstObserved,
       lastObserved: schema.lastObserved,

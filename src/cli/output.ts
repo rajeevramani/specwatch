@@ -26,6 +26,25 @@ export function isInteractive(): boolean {
   return process.stdout.isTTY === true;
 }
 
+export function isQuiet(): boolean {
+  return quietMode;
+}
+
+export function isVerbose(): boolean {
+  return verboseMode;
+}
+
+/**
+ * The legacy dashboard is dormant in 0.4.0 by product scope, not fixed or
+ * qualified. No CLI opt-in is exposed. Keep its original context restrictions
+ * as safeguards if a future, separately reviewed change reintroduces it.
+ */
+const LIVE_DASHBOARD_ENABLED = false;
+
+export function shouldUseTui(interactive: boolean, consumer: string, quiet: boolean): boolean {
+  return LIVE_DASHBOARD_ENABLED && interactive && consumer === 'human' && !quiet;
+}
+
 export function info(msg: string): void {
   if (!quietMode) {
     process.stderr.write(isInteractive() ? chalk.blue(msg) + '\n' : msg + '\n');
@@ -62,7 +81,9 @@ export function formatStatus(session: Session): string {
   if (session.name) lines.push(`Name:    ${session.name}`);
   lines.push(`Target:  ${session.targetUrl}`);
   lines.push(`Proxy:   http://localhost:${session.port}`);
-  lines.push(`Samples: ${session.sampleCount}${session.skippedCount > 0 ? ` (${session.skippedCount} skipped)` : ''}`);
+  lines.push(
+    `Samples: ${session.sampleCount}${session.skippedCount > 0 ? ` (${session.skippedCount} skipped)` : ''}`,
+  );
   if (session.maxSamples) lines.push(`Max:     ${session.maxSamples}`);
   if (session.consumer === 'agent') lines.push(`Consumer: agent`);
   lines.push(`Created: ${session.createdAt}`);
@@ -118,7 +139,10 @@ export function formatSnapshotList(snapshots: SnapshotInfo[]): string {
 
   if (!isInteractive()) {
     return snapshots
-      .map((s) => `${s.snapshot}\t${s.endpointCount}\t${s.sampleCount}\t${s.avgConfidence.toFixed(2)}\t${s.createdAt}`)
+      .map(
+        (s) =>
+          `${s.snapshot}\t${s.endpointCount}\t${s.sampleCount}\t${s.avgConfidence.toFixed(2)}\t${s.createdAt}`,
+      )
       .join('\n');
   }
 
@@ -140,10 +164,7 @@ export function formatSnapshotList(snapshots: SnapshotInfo[]): string {
   return table.toString();
 }
 
-export function formatAggregationSummary(
-  schemas: AggregatedSchema[],
-  sampleCount: number,
-): string {
+export function formatAggregationSummary(schemas: AggregatedSchema[], sampleCount: number): string {
   const avgConfidence =
     schemas.length > 0
       ? schemas.reduce((sum, s) => sum + s.confidenceScore, 0) / schemas.length
@@ -163,15 +184,16 @@ export function formatDiff(diff: SchemaDiff, endpoint?: string): string {
   if (diff.breakingChanges.length > 0) {
     lines.push(`  Breaking Changes (${diff.breakingChanges.length}):`);
     for (const change of diff.breakingChanges) {
-      const tag = change.type === 'required_field_removed'
-        ? 'REMOVED'
-        : change.type === 'incompatible_type_change'
-          ? 'TYPE'
-          : change.type === 'required_field_added'
-            ? 'ADDED'
-            : change.type === 'field_became_required'
-              ? 'REQUIRED'
-              : 'CHANGED';
+      const tag =
+        change.type === 'required_field_removed'
+          ? 'REMOVED'
+          : change.type === 'incompatible_type_change'
+            ? 'TYPE'
+            : change.type === 'required_field_added'
+              ? 'ADDED'
+              : change.type === 'field_became_required'
+                ? 'REQUIRED'
+                : 'CHANGED';
       lines.push(`    [${tag}] ${change.path} - ${change.description}`);
     }
   }
@@ -216,6 +238,9 @@ function loopPatternLabel(
   return `${loop.fromMethod} ${loop.fromPath} → ${loop.toMethod} ${loop.toPath}`;
 }
 
+/** Human CALL SEQUENCE table is a capped summary; JSON carries the full detail. */
+const CALL_SEQUENCE_CAP = 15;
+
 export function formatAgentReport(
   sessionName: string,
   sequenceAnalysis: SequenceAnalysis,
@@ -257,14 +282,8 @@ export function formatAgentReport(
       style: { head: ['cyan'] },
     });
     for (const tool of sequenceAnalysis.toolUsage) {
-      const label = isJsonRpc
-        ? tool.operationKey.replace(/^tools\/call:/, '')
-        : tool.operationKey;
-      usageTable.push([
-        label,
-        tool.count.toString(),
-        tool.isRedundant ? 'redundant' : '',
-      ]);
+      const label = isJsonRpc ? tool.operationKey.replace(/^tools\/call:/, '') : tool.operationKey;
+      usageTable.push([label, tool.count.toString(), tool.isRedundant ? 'redundant' : '']);
     }
     lines.push(usageTable.toString());
   }
@@ -280,20 +299,18 @@ export function formatAgentReport(
       wordWrap: true,
     });
     for (const phase of phaseAnalysis.phases) {
-      const uniqueTools = [...new Set(phase.samples.map((s) => {
-        const label = s.toolName ?? s.operationKey;
-        return isJsonRpc ? label.replace(/^tools\/call:/, '') : label;
-      }))];
+      const uniqueTools = [
+        ...new Set(
+          phase.samples.map((s) => {
+            const label = s.toolName ?? s.operationKey;
+            return isJsonRpc ? label.replace(/^tools\/call:/, '') : label;
+          }),
+        ),
+      ];
       const toolsStr = uniqueTools.join(', ');
-      const durationStr = phase.duration < 1000
-        ? `${phase.duration}ms`
-        : `${(phase.duration / 1000).toFixed(1)}s`;
-      phaseTable.push([
-        phase.name,
-        toolsStr,
-        durationStr,
-        phase.samples.length.toString(),
-      ]);
+      const durationStr =
+        phase.duration < 1000 ? `${phase.duration}ms` : `${(phase.duration / 1000).toFixed(1)}s`;
+      phaseTable.push([phase.name, toolsStr, durationStr, phase.samples.length.toString()]);
     }
     lines.push(phaseTable.toString());
 
@@ -306,11 +323,14 @@ export function formatAgentReport(
     if (allPhaseSamples.length > 0) {
       lines.push('');
       lines.push('CALL SEQUENCE');
+      // The human table is a capped summary; full per-sample detail is lossless
+      // in the machine channel (`agent-report` default JSON / `investigate --json`).
+      const shown = Math.min(allPhaseSamples.length, CALL_SEQUENCE_CAP);
       const seqTable = new Table({
         head: ['#', 'Tool', 'Phase', 'Status'],
         style: { head: ['cyan'] },
       });
-      for (let i = 0; i < allPhaseSamples.length; i++) {
+      for (let i = 0; i < shown; i++) {
         const ps = allPhaseSamples[i];
         const label = isJsonRpc
           ? (ps.toolName ?? ps.operationKey).replace(/^tools\/call:/, '')
@@ -319,6 +339,11 @@ export function formatAgentReport(
         seqTable.push([(i + 1).toString(), label, ps.phase, status]);
       }
       lines.push(seqTable.toString());
+      if (allPhaseSamples.length > CALL_SEQUENCE_CAP) {
+        lines.push(
+          `  … and ${allPhaseSamples.length - CALL_SEQUENCE_CAP} more calls (use --format json for the full per-sample detail)`,
+        );
+      }
     }
   }
 
@@ -355,15 +380,11 @@ export function formatAgentReport(
     const redundantTable = new Table({
       head: redundantHead,
       style: { head: ['cyan'] },
-      ...(hasInvestigation
-        ? { wordWrap: true, colWidths: [undefined, 8, 10, 8, 46] }
-        : {}),
+      ...(hasInvestigation ? { wordWrap: true, colWidths: [null, 8, 10, 8, 46] } : {}),
     });
     for (const r of sequenceAnalysis.redundantCalls) {
       const extra = r.count - r.expectedCount;
-      const label = isJsonRpc
-        ? r.operationKey.replace(/^tools\/call:/, '')
-        : r.operationKey;
+      const label = isJsonRpc ? r.operationKey.replace(/^tools\/call:/, '') : r.operationKey;
       const row: string[] = [
         label,
         r.count.toString(),
@@ -458,8 +479,7 @@ export function formatInvestigation(investigation: CallInvestigation): string {
     let delta = '\u2014'; // em dash
     if (i > 0) {
       const prev = investigation.occurrences[i - 1];
-      const deltaMs =
-        new Date(occ.capturedAt).getTime() - new Date(prev.capturedAt).getTime();
+      const deltaMs = new Date(occ.capturedAt).getTime() - new Date(prev.capturedAt).getTime();
       delta = `+${(deltaMs / 1000).toFixed(1)}s`;
     }
     timelineTable.push([(i + 1).toString(), time, status, phase, delta]);
@@ -473,8 +493,7 @@ export function formatInvestigation(investigation: CallInvestigation): string {
     for (const pair of investigation.pairAnalyses) {
       const fromIdx =
         investigation.occurrences.findIndex((o) => o.sampleIndex === pair.fromIndex) + 1;
-      const toIdx =
-        investigation.occurrences.findIndex((o) => o.sampleIndex === pair.toIndex) + 1;
+      const toIdx = investigation.occurrences.findIndex((o) => o.sampleIndex === pair.toIndex) + 1;
       const deltaStr = `+${(pair.deltaMs / 1000).toFixed(1)}s`;
 
       let phaseStr: string;
@@ -493,7 +512,9 @@ export function formatInvestigation(investigation: CallInvestigation): string {
       if (pair.requestDiff) {
         const changes =
           pair.requestDiff.breakingChanges.length + pair.requestDiff.nonBreakingChanges.length;
-        lines.push(changes === 0 ? '    Request:  identical' : `    Request:  ${changes} fields changed`);
+        lines.push(
+          changes === 0 ? '    Request:  identical' : `    Request:  ${changes} fields changed`,
+        );
       } else {
         lines.push('    Request:  identical');
       }
@@ -515,8 +536,7 @@ export function formatInvestigation(investigation: CallInvestigation): string {
       }
 
       // Intervening ops
-      const between =
-        pair.interveningOps.length > 0 ? pair.interveningOps.join(', ') : '(none)';
+      const between = pair.interveningOps.length > 0 ? pair.interveningOps.join(', ') : '(none)';
       lines.push(`    Between:  ${between}`);
 
       // Cause

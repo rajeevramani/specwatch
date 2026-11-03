@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Read the per-project Specwatch PID file, exit silently if not found
+DIR="$(dirname "$0")"
+cat "$("$DIR/specwatch-pid-path")" 2>/dev/null

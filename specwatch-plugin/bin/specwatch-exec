@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Run a specwatch subcommand with safe word-splitting of an args string.
+# Usage: specwatch-exec <subcommand> "<args-string>" [extra-args...]
+#
+# Centralizes the same word-split-in-bash trick used by specwatch-start-bg
+# so callers do not have to worry about zsh vs bash splitting differences.
+set -u
+SUBCMD="${1:-}"
+ARGS_STR="${2:-}"
+shift 2 || true
+if [ -z "$SUBCMD" ]; then
+  echo "ERROR: subcommand required" >&2
+  exit 2
+fi
+set -f
+# shellcheck disable=SC2086
+npx specwatch "$SUBCMD" $ARGS_STR "$@"
+RC=$?
+set +f
+exit $RC

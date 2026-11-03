@@ -312,7 +312,7 @@ describe('$ref extraction', () => {
         httpMethod: 'GET',
         path: '/users',
         responseSchemas: { '200': USER_SCHEMA },
-        requestHeaders: [{ name: 'Authorization', example: 'Bearer token123' }],
+        requestHeaders: [{ name: 'Authorization', authSchemes: ['bearer'] }],
       }),
     ]);
 

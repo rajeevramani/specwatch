@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Start specwatch as a background nohup process and track its PID.
+# Usage: specwatch-start-bg "<args-string>"
+#
+# Word-splits the args string inside this bash script — caller may be zsh
+# (where unquoted vars do not word-split by default), so we centralize the
+# splitting here in a guaranteed bash environment.
+set -u
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ARGS_STR="${1:-}"
+if [ -z "$ARGS_STR" ]; then
+  echo "ERROR: target URL required" >&2
+  exit 2
+fi
+LOG_FILE=$("$DIR/specwatch-log-path")
+# Disable globbing so that args containing * etc. are not expanded.
+set -f
+# Intentionally unquoted to word-split on whitespace.
+# shellcheck disable=SC2086
+nohup npx specwatch start $ARGS_STR > "$LOG_FILE" 2>&1 &
+PID=$!
+set +f
+"$DIR/specwatch-pid-write" "$PID"
+echo "PID=$PID"
+echo "LOG=$LOG_FILE"

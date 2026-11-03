@@ -85,6 +85,7 @@ interface SequenceKey {
   fromPath: string;
   toMethod: string;
   toPath: string;
+  equivalentCapturedRequest?: boolean;
 }
 
 interface SequenceAccumulator {
@@ -122,8 +123,7 @@ function isChildResource(fromPath: string, toPath: string): boolean {
   // toPath should start with the fromPath (including param) and have additional segments
   // e.g. /parents/{parentId}/children starts with /parents/{parentId}
   return (
-    toPath.startsWith(fromPath + '/') ||
-    toPath.startsWith(fromBase + '/{') // parent/{id}/child pattern
+    toPath.startsWith(fromPath + '/') || toPath.startsWith(fromBase + '/{') // parent/{id}/child pattern
   );
 }
 
@@ -136,6 +136,7 @@ export function classifyPattern(
   toMethod: string,
   toPath: string,
   avgDelayMs: number,
+  equivalentCapturedRequest = true,
 ): SequencePattern {
   const fromBase = getResourceBase(fromPath);
   const toBase = getResourceBase(toPath);
@@ -165,6 +166,20 @@ export function classifyPattern(
     }
   }
 
+  // retry: the same idempotent READ called consecutively (a repeated equivalent
+  // call). Classified as a redundant duplicate, not a verification loop.
+  // Restricted to GET: two identical writes (POST/PUT/PATCH/DELETE) can be
+  // legitimate distinct operations, so they are NOT inferred redundant from
+  // method+path alone (would need request-body/status evidence — deferred).
+  if (
+    fromMethod === 'GET' &&
+    toMethod === 'GET' &&
+    fromPath === toPath &&
+    equivalentCapturedRequest
+  ) {
+    return 'retry';
+  }
+
   return 'unknown';
 }
 
@@ -175,10 +190,7 @@ export function classifyPattern(
 /**
  * Classify a pair of consecutive JSON-RPC operations into a known pattern.
  */
-export function classifyJsonRpcPattern(
-  fromKey: string,
-  toKey: string,
-): SequencePattern {
+export function classifyJsonRpcPattern(fromKey: string, toKey: string): SequencePattern {
   // retry: same tool called consecutively (e.g., tools/call:my_tool → tools/call:my_tool)
   if (fromKey === toKey && fromKey.startsWith('tools/call:')) {
     return 'retry';
@@ -193,12 +205,7 @@ export function classifyJsonRpcPattern(
   // Detect create→query pattern by looking at tool name prefixes
   const fromParts = fromKey.split(':');
   const toParts = toKey.split(':');
-  if (
-    fromParts[0] === 'tools/call' &&
-    toParts[0] === 'tools/call' &&
-    fromParts[1] &&
-    toParts[1]
-  ) {
+  if (fromParts[0] === 'tools/call' && toParts[0] === 'tools/call' && fromParts[1] && toParts[1]) {
     const fromTool = fromParts[1];
     const toTool = toParts[1];
     // create/set/update → get/query/read/describe/list on same resource type
@@ -225,7 +232,13 @@ export function classifyJsonRpcPattern(
  * Build a string key for grouping identical sequences.
  */
 function sequenceKeyString(key: SequenceKey): string {
-  return `${key.fromMethod} ${key.fromPath} -> ${key.toMethod} ${key.toPath}`;
+  return JSON.stringify([
+    key.fromMethod,
+    key.fromPath,
+    key.toMethod,
+    key.toPath,
+    key.equivalentCapturedRequest,
+  ]);
 }
 
 /**
@@ -257,6 +270,16 @@ const WINDOW_SIZE = 5;
 
 /** Operations expected to be called only once per session. */
 const ONCE_PER_SESSION = new Set(['initialize', 'tools/list', 'notifications/initialized']);
+
+function capturedQueriesEqual(left: Sample['queryParams'], right: Sample['queryParams']): boolean {
+  const a = left ?? {};
+  const b = right ?? {};
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && a[key] === b[key])
+  );
+}
 
 export function detectSequences(db: Database.Database, sessionId: string): SequenceAnalysis {
   const empty: SequenceAnalysis = {
@@ -300,7 +323,7 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
         redundantCalls.push({ operationKey: opKey, count, expectedCount: 1 });
       }
     }
-    redundantCalls.sort((a, b) => (b.count - b.expectedCount) - (a.count - a.expectedCount));
+    redundantCalls.sort((a, b) => b.count - b.expectedCount - (a.count - a.expectedCount));
   }
 
   // --- Build tool usage list ---
@@ -347,18 +370,26 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
     for (let i = 0; i < samples.length - 1; i++) {
       const fromOp = ops[i];
       const toOp = ops[i + 1];
+      const retryCandidate =
+        fromOp.method === 'GET' && toOp.method === 'GET' && fromOp.path === toOp.path;
 
       const key: SequenceKey = {
         fromMethod: fromOp.method,
         fromPath: fromOp.path,
         toMethod: toOp.method,
         toPath: toOp.path,
+        ...(retryCandidate
+          ? {
+              equivalentCapturedRequest:
+                samples[i].path === samples[i + 1].path &&
+                capturedQueriesEqual(samples[i].queryParams, samples[i + 1].queryParams),
+            }
+          : {}),
       };
 
       const keyStr = sequenceKeyString(key);
       const delayMs =
-        new Date(samples[i + 1].capturedAt).getTime() -
-        new Date(samples[i].capturedAt).getTime();
+        new Date(samples[i + 1].capturedAt).getTime() - new Date(samples[i].capturedAt).getTime();
 
       const existing = accumulators.get(keyStr);
       if (existing) {
@@ -383,6 +414,7 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
           acc.key.toMethod,
           acc.key.toPath,
           avgDelayMs,
+          acc.key.equivalentCapturedRequest,
         );
 
     sequences.push({
@@ -399,13 +431,19 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
   // Sort by count descending for readability
   sequences.sort((a, b) => b.count - a.count);
 
-  const verificationLoops = sequences.filter(
-    (s) => s.pattern === 'verification_loop' || s.pattern === 'redundant_list' || s.pattern === 'retry',
+  // Verification loops are read-after-write reads only. Repeated equivalent
+  // calls (retry / redundant_list) are a DISTINCT "redundant duplicate" signal,
+  // tracked separately so downstream evidence can decouple the two.
+  const verificationLoops = sequences.filter((s) => s.pattern === 'verification_loop');
+  const redundantSequences = sequences.filter(
+    (s) => s.pattern === 'retry' || s.pattern === 'redundant_list',
   );
-  const wastedRequests = verificationLoops.reduce((sum, s) => sum + s.count, 0);
 
-  // Add redundant call counts to wasted requests
-  const redundantWasted = redundantCalls.reduce(
+  // Wasted requests in the human report stay broad: verification reads +
+  // redundant duplicates (sequence-level) + JSON-RPC once-per-session over-calls.
+  const verificationWasted = verificationLoops.reduce((sum, s) => sum + s.count, 0);
+  const redundantSeqWasted = redundantSequences.reduce((sum, s) => sum + s.count, 0);
+  const redundantCallWasted = redundantCalls.reduce(
     (sum, r) => sum + (r.count - r.expectedCount),
     0,
   );
@@ -414,7 +452,7 @@ export function detectSequences(db: Database.Database, sessionId: string): Seque
     sequences,
     verificationLoops,
     totalRequests: samples.length,
-    wastedRequests: wastedRequests + redundantWasted,
+    wastedRequests: verificationWasted + redundantSeqWasted + redundantCallWasted,
     redundantCalls,
     toolUsage,
   };

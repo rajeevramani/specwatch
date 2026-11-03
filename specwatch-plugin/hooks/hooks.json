@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "matcher": {},
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PID=$(${CLAUDE_PLUGIN_ROOT}/bin/specwatch-pid-read); if [ -n \"$PID\" ] && kill -0 \"$PID\" 2>/dev/null; then echo 'WARNING: Specwatch proxy is still running (PID '\"$PID\"'). Run /specwatch:stop or kill '\"$PID\"' to stop it.' >&2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,8 +1,8 @@
 /**
  * Tests for global header deduplication in OpenAPI export.
  *
- * Verifies that headers appearing in ALL endpoints with identical values
- * are factored out of individual operations and optionally reported via
+ * Verifies that names present in ALL endpoints remain operation parameters
+ * and are optionally reported as structural presence via
  * x-specwatch-global-headers metadata extension.
  */
 
@@ -42,43 +42,43 @@ describe('extractGlobalHeaders', () => {
     expect(extractGlobalHeaders([])).toEqual([]);
   });
 
-  it('returns headers present in all schemas with identical values', () => {
-    const commonHeader: HeaderEntry = { name: 'X-Request-Id', example: 'abc-123' };
+  it('returns structural headers present in all schemas', () => {
+    const commonHeader: HeaderEntry = { name: 'x-request-id' };
     const schemas = [
       makeSchema({
         path: '/users',
-        requestHeaders: [commonHeader, { name: 'X-Custom', example: 'val1' }],
+        requestHeaders: [commonHeader, { name: 'x-custom' }],
       }),
       makeSchema({
         path: '/orders',
-        requestHeaders: [commonHeader, { name: 'X-Other', example: 'val2' }],
+        requestHeaders: [commonHeader, { name: 'x-other' }],
       }),
     ];
 
     const globals = extractGlobalHeaders(schemas);
-    expect(globals).toEqual([{ name: 'X-Request-Id', example: 'abc-123' }]);
+    expect(globals).toEqual([{ name: 'x-request-id' }]);
   });
 
-  it('returns empty array when headers differ in value across schemas', () => {
+  it('treats shared names as global presence regardless of old value distinctions', () => {
     const schemas = [
       makeSchema({
         path: '/users',
-        requestHeaders: [{ name: 'X-Request-Id', example: 'abc' }],
+        requestHeaders: [{ name: 'x-request-id' }],
       }),
       makeSchema({
         path: '/orders',
-        requestHeaders: [{ name: 'X-Request-Id', example: 'def' }],
+        requestHeaders: [{ name: 'x-request-id' }],
       }),
     ];
 
-    expect(extractGlobalHeaders(schemas)).toEqual([]);
+    expect(extractGlobalHeaders(schemas)).toEqual([{ name: 'x-request-id' }]);
   });
 
   it('returns empty array when a schema has no headers', () => {
     const schemas = [
       makeSchema({
         path: '/users',
-        requestHeaders: [{ name: 'X-Request-Id', example: 'abc' }],
+        requestHeaders: [{ name: 'x-request-id' }],
       }),
       makeSchema({ path: '/orders' }),
     ];
@@ -91,41 +91,41 @@ describe('extractGlobalHeaders', () => {
       makeSchema({
         path: '/users',
         requestHeaders: [
-          { name: 'Content-Type', example: 'application/json' },
-          { name: 'Authorization', example: 'Bearer token' },
-          { name: 'X-Custom', example: 'shared' },
+          { name: 'content-type' },
+          { name: 'authorization' },
+          { name: 'x-custom' },
         ],
       }),
       makeSchema({
         path: '/orders',
         requestHeaders: [
-          { name: 'Content-Type', example: 'application/json' },
-          { name: 'Authorization', example: 'Bearer token' },
-          { name: 'X-Custom', example: 'shared' },
+          { name: 'content-type' },
+          { name: 'authorization' },
+          { name: 'x-custom' },
         ],
       }),
     ];
 
     const globals = extractGlobalHeaders(schemas);
     // Only X-Custom should be global (Content-Type is transport, Authorization is auth)
-    expect(globals).toEqual([{ name: 'X-Custom', example: 'shared' }]);
+    expect(globals).toEqual([{ name: 'x-custom' }]);
   });
 
   it('handles case-insensitive header name matching', () => {
     const schemas = [
       makeSchema({
         path: '/users',
-        requestHeaders: [{ name: 'X-Request-Id', example: 'abc' }],
+        requestHeaders: [{ name: 'x-request-id' }],
       }),
       makeSchema({
         path: '/orders',
-        requestHeaders: [{ name: 'x-request-id', example: 'abc' }],
+        requestHeaders: [{ name: 'x-request-id' }],
       }),
     ];
 
     const globals = extractGlobalHeaders(schemas);
     expect(globals).toHaveLength(1);
-    expect(globals[0].example).toBe('abc');
+    expect(globals[0]).toEqual({ name: 'x-request-id' });
   });
 
   it('returns multiple global headers when all match', () => {
@@ -133,15 +133,15 @@ describe('extractGlobalHeaders', () => {
       makeSchema({
         path: '/users',
         requestHeaders: [
-          { name: 'X-Request-Id', example: 'abc' },
-          { name: 'X-Trace', example: 'trace-1' },
+          { name: 'x-request-id' },
+          { name: 'x-trace' },
         ],
       }),
       makeSchema({
         path: '/orders',
         requestHeaders: [
-          { name: 'X-Request-Id', example: 'abc' },
-          { name: 'X-Trace', example: 'trace-1' },
+          { name: 'x-request-id' },
+          { name: 'x-trace' },
         ],
       }),
     ];
@@ -154,8 +154,8 @@ describe('extractGlobalHeaders', () => {
     const schemas = [
       makeSchema({
         requestHeaders: [
-          { name: 'X-Custom', example: 'val' },
-          { name: 'X-Other', example: 'val2' },
+          { name: 'x-custom' },
+          { name: 'x-other' },
         ],
       }),
     ];
@@ -166,15 +166,15 @@ describe('extractGlobalHeaders', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildOperationObject — global header exclusion
+// buildOperationObject — shared header preservation
 // ---------------------------------------------------------------------------
 
 describe('buildOperationObject with globalHeaders', () => {
-  it('excludes global headers from operation parameters', () => {
+  it('preserves global headers in operation parameters', () => {
     const schema = makeSchema({
       requestHeaders: [
-        { name: 'X-Request-Id', example: 'abc' },
-        { name: 'X-Custom', example: 'val' },
+        { name: 'x-request-id' },
+        { name: 'x-custom' },
       ],
     });
 
@@ -182,17 +182,16 @@ describe('buildOperationObject with globalHeaders', () => {
     const operation = buildOperationObject(schema, {}, globalHeaders);
     const params = operation['parameters'] as Array<Record<string, unknown>>;
 
-    // Only X-Custom should remain
+    // Shared names do not remove an operation's observed header presence.
     const headerParams = params.filter((p) => p['in'] === 'header');
-    expect(headerParams).toHaveLength(1);
-    expect(headerParams[0]['name']).toBe('X-Custom');
+    expect(headerParams.map((parameter) => parameter['name'])).toEqual(['x-custom', 'x-request-id']);
   });
 
   it('includes all headers when globalHeaders is empty', () => {
     const schema = makeSchema({
       requestHeaders: [
-        { name: 'X-Request-Id', example: 'abc' },
-        { name: 'X-Custom', example: 'val' },
+        { name: 'x-request-id' },
+        { name: 'x-custom' },
       ],
     });
 
@@ -208,8 +207,8 @@ describe('buildOperationObject with globalHeaders', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildOpenApiDocument — header deduplication', () => {
-  const sharedHeader: HeaderEntry = { name: 'X-Request-Id', example: 'abc-123' };
-  const uniqueHeader: HeaderEntry = { name: 'X-Custom', example: 'unique-val' };
+  const sharedHeader: HeaderEntry = { name: 'x-request-id' };
+  const uniqueHeader: HeaderEntry = { name: 'x-custom' };
 
   const schemas: AggregatedSchema[] = [
     makeSchema({
@@ -228,17 +227,17 @@ describe('buildOpenApiDocument — header deduplication', () => {
     }),
   ];
 
-  it('removes global headers from individual operations', () => {
+  it('preserves global header parameters on individual operations', () => {
     const doc = buildOpenApiDocument(schemas);
     const paths = doc['paths'] as Record<string, Record<string, Record<string, unknown>>>;
 
-    // X-Request-Id is global — should not appear in any operation
+    // Shared presence must remain visible even without metadata extensions.
     for (const [, methods] of Object.entries(paths)) {
       for (const [, operation] of Object.entries(methods)) {
         const params = (operation['parameters'] as Array<Record<string, unknown>>) ?? [];
         const headerParams = params.filter((p) => p['in'] === 'header');
         const headerNames = headerParams.map((p) => (p['name'] as string).toLowerCase());
-        expect(headerNames).not.toContain('x-request-id');
+        expect(headerNames).toContain('x-request-id');
       }
     }
   });
@@ -250,20 +249,18 @@ describe('buildOpenApiDocument — header deduplication', () => {
     const params = usersGet['parameters'] as Array<Record<string, unknown>>;
     const headerParams = params.filter((p) => p['in'] === 'header');
     // X-Custom is only on /users, not global, so it stays
-    expect(headerParams).toHaveLength(1);
-    expect(headerParams[0]['name']).toBe('X-Custom');
+    expect(headerParams.map((parameter) => parameter['name'])).toEqual(['x-custom', 'x-request-id']);
   });
 
   it('adds x-specwatch-global-headers when includeMetadata is true', () => {
     const doc = buildOpenApiDocument(schemas, { includeMetadata: true });
     const globalHeaders = doc['x-specwatch-global-headers'] as Array<{
       name: string;
-      example: string;
     }>;
     expect(globalHeaders).toBeDefined();
     expect(globalHeaders).toHaveLength(1);
-    expect(globalHeaders[0].name).toBe('X-Request-Id');
-    expect(globalHeaders[0].example).toBe('abc-123');
+    expect(globalHeaders[0].name).toBe('x-request-id');
+    expect(globalHeaders[0]).toEqual({ name: 'x-request-id' });
   });
 
   it('does not add x-specwatch-global-headers when includeMetadata is false', () => {
@@ -277,14 +274,14 @@ describe('buildOpenApiDocument — header deduplication', () => {
         id: 1,
         path: '/users',
         httpMethod: 'GET',
-        requestHeaders: [{ name: 'X-Custom', example: 'a' }],
+        requestHeaders: [{ name: 'x-custom' }],
         responseSchemas: { '200': { type: 'object' } },
       }),
       makeSchema({
         id: 2,
         path: '/orders',
         httpMethod: 'GET',
-        requestHeaders: [{ name: 'X-Other', example: 'b' }],
+        requestHeaders: [{ name: 'x-other' }],
         responseSchemas: { '200': { type: 'object' } },
       }),
     ];

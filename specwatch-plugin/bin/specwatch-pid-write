@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Write a PID to the per-project Specwatch PID file
+# Usage: specwatch-pid-write <pid>
+DIR="$(dirname "$0")"
+echo "$1" > "$("$DIR/specwatch-pid-path")"

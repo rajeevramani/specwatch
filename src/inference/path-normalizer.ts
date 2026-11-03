@@ -246,6 +246,15 @@ function classifySegment(
 }
 
 /**
+ * Whether a literal leaf has the same dynamic-value evidence used during capture.
+ * This does not infer alphabetic IDs from sibling response shapes or rename paths.
+ */
+export function isIdentifierLikePathSegment(segment: string): boolean {
+  if (segment.startsWith('{') && segment.endsWith('}')) return false;
+  return classifySegment(segment, null, false) !== null;
+}
+
+/**
  * Normalize a URL path by replacing dynamic segments with named parameter templates.
  *
  * - Strips query strings before normalizing

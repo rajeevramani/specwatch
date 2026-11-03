@@ -226,6 +226,10 @@ function chooseBestName(usages: DomainModelUsage[], schema: InferredSchema): str
     }
   }
 
+  // Break ties within semantic priority classes deterministically without
+  // mutating recorded usages or depending on the host's locale collation.
+  pool = [...pool].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+
   // Prefer single-resource GET (path ends with a parameter)
   const singleResource = pool.find(
     (u) => u.httpMethod === 'GET' && u.path.match(/\/\{[^}]+\}$/),

@@ -8,13 +8,20 @@ Specwatch learns JSON API schemas from observed HTTP traffic and exports OpenAPI
 
 It runs as a local reverse proxy with SQLite storage. Schema inference and ordinary exports are local; optional `--explain` sends a constructed investigation prompt to your configured LLM service.
 
-## Unreleased candidate status
+## Installation
 
-This branch documents the human-approved **local candidate `0.4.0`**, not a published release. npm `latest` remains `0.3.2`; neither `0.3.3` nor the historical local `0.3.4` label is an evidenced npm release. Version approval authorizes preparation and exact-package qualification only, not publication. A version string alone does not identify verified repaired bytes.
+Specwatch `0.4.0` requires **Node.js 22 or newer**. Install the version explicitly:
 
-The header privacy correction, default JSON agent output, plain capture output and investigation JSON described below are candidate behavior. **Do not install `latest` or an old package while assuming it has these guarantees.** Use an explicitly approved repaired candidate, recording its tarball checksum and installed CLI checksum/version. The standalone source skill at `skills/learn-api/SKILL.md` is candidate-only and unlisted until a repaired published artifact is verified.
+```bash
+npm install --global specwatch@0.4.0
+specwatch --version
+```
 
-Commands below assume that exact installed candidate is available as `specwatch`. For source development, run `npm ci` and `npm run build`, then substitute `node dist/index.js` for `specwatch`. Installation may run native dependency build scripts; approve installation before running it. These are local preparation instructions, not a release or publication announcement.
+This README describes `0.4.0`; a source checkout or version string alone does not prove npm publication. To check availability, run `npm view specwatch@0.4.0 version`. If the version is not yet available, use a verified local tarball or the source-build instructions below rather than silently falling back to an older package. Older `0.3.x` packages do not include the privacy, export and output-contract changes described here.
+
+Commands below assume `specwatch` resolves to the intended `0.4.0` installation. Native dependency installation may require build tools on platforms without a prebuilt binary. For source development, run `npm ci` and `npm run build`, then substitute `node dist/index.js` for `specwatch`.
+
+The standalone source skill at `skills/learn-api/SKILL.md` is distributed separately from the npm CLI. It remains candidate-only and unlisted until its published-artifact walkthrough is verified; the CLI release does not itself publish the skill to a marketplace.
 
 ## Where to use it
 
@@ -73,7 +80,7 @@ Human sessions use plain, line-oriented output even on an interactive terminal. 
 - Query parameters, observed response codes and schema differences across sessions.
 - Structural header names and derived Bearer/Basic classifications; X-API-Key presence supports API-key discovery.
 
-Current request-body aggregation prefers successful (2xx) observations when any exist, excluding error-only request fields; when no 2xx exists, it uses the observed error groups. Repeated-call and completeness classifications are heuristics, not proof that a call was unnecessary or that a missing field caused it. Some OpenAPI/analysis correctness boundaries remain under revalidation; this candidate is not release-qualified merely because a fixture passes.
+Current request-body aggregation prefers successful (2xx) observations when any exist, excluding error-only request fields; when no 2xx exists, it uses the observed error groups. Repeated-call and completeness classifications are heuristics, not proof that a call was unnecessary or that a missing field caused it. Observed traffic is not independent verification of the full API contract; review generated output against the actual API before enforcing it or generating clients.
 
 ### Conservative contracts and optional enum constraints
 
@@ -93,7 +100,7 @@ Within the existing model-name priorities, competing eligible paths now use a fi
 
 ## Header privacy and database upgrades
 
-In the repaired candidate, retained header metadata contains valid **lowercase names only**, plus an optional sorted closed `authSchemes` array (`bearer`, `basic`) for `authorization`. No raw, masked or empty header `example` field is retained. Unknown schemes retain the header's name, not arbitrary scheme text. Forwarded peer header values are unchanged.
+In `0.4.0`, retained header metadata contains valid **lowercase names only**, plus an optional sorted closed `authSchemes` array (`bearer`, `basic`) for `authorization`. No raw, masked or empty header `example` field is retained. Unknown schemes retain the header's name, not arbitrary scheme text. Forwarded peer header values are unchanged.
 
 Raw JSON and OpenAPI exports defensively project header inputs. Observed application headers remain optional string parameters on each operation, without examples, even when shared by all operations. `x-specwatch-global-headers`, when metadata is enabled, describes names present across operations—not equality of former header values. Authentication/transport headers are excluded from ordinary operation header parameters.
 
@@ -182,7 +189,7 @@ Prefer `Ctrl+C` on the owned foreground capture. The `stop` command can mark the
 
 ## Runtime requirements and development
 
-The candidate requires **Node.js >=22**, matching its Ink dependency requirements; CI targets Node22. Node20 is no longer a supported runtime for this candidate. Earlier Node20 execution of the historical package is not support or interactive-TUI qualification for `0.4.0`. Qualification is specific to the exact installed artifact, runtime and platform; do not override engine checks and call the result supported.
+Specwatch `0.4.0` requires **Node.js >=22**, matching its Ink dependency requirements; CI targets Node22. Node20 is no longer a supported runtime for this candidate. Earlier Node20 execution of the historical package is not support or interactive-TUI qualification for `0.4.0`. Qualification is specific to the exact installed artifact, runtime and platform; do not override engine checks and call the result supported.
 
 ```bash
 npm ci

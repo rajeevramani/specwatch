@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Local candidate `0.4.0` and minimum Node22 are approved for preparation, not publication. Changes remain Unreleased until a separately authorized release. Qualify the exact new source/package checksum rather than relabeling historical `0.3.4` evidence. npm's latest published version remains `0.3.2`.
+## [0.4.0] - 2026-11-04
+
+This pre-1.0 minor release intentionally changes the runtime minimum, agent stdout, retained header metadata and generated OpenAPI contracts. Review the migration notes before upgrading.
 
 ### Changed / migration
 
@@ -24,6 +26,10 @@ Local candidate `0.4.0` and minimum Node22 are approved for preparation, not pub
 - **Header export semantics:** shared application-header names remain per-operation optional string parameters, without examples. With metadata enabled, `x-specwatch-global-headers` means presence across operations, not equal header values. Raw JSON header shape and header-name casing intentionally change.
 - **Forward-only database migration v4** logically cleans the four header JSON columns in samples/aggregated schemas, preserving nonheader records and snapshots. Old binaries reject a v4 store. Invalid legacy header JSON aborts/rolls back the v4 step with a fixed value-free error; the failed-open handle closes. For recovery, use a different empty `SPECWATCH_HOME` and private maintainer assistance, not printed raw JSON, forced schema versions or the old capture binary.
 - **Logical cleanup is not secure erasure:** historic values may survive WAL/free pages, snapshots, backups and existing exports, which are not automatically erased. The strict header guarantee applies to new retained/exported metadata, not all path/query/schema values or caller-owned historical files.
+
+### Security
+
+- Raise the `js-yaml` minimum to `^4.3.2` and update the `follow-redirects` lock entry to `1.16.2` to address the runtime dependency advisories found during release qualification. Refresh stale consumer dependency locks and audit the resolved tree; a repository lockfile does not override arbitrary downstream pins.
 
 ### Fixed
 
@@ -42,7 +48,7 @@ Local candidate `0.4.0` and minimum Node22 are approved for preparation, not pub
 
 ### Changed (breaking agent CLI)
 
-- **`specwatch agent-report` now emits machine-readable AgentEvidence JSON on stdout by default** for `--consumer agent` sessions (schema `specwatch.agent_evidence.v1`). It previously printed human-readable tables to stdout. Use `--human` (or `--format human`, or `--pretty`) to restore the tables. `-o <file>` is unchanged (still writes the evidence JSON to a file); with `-o` and no `--human`, stdout also stays JSON. Any script that parsed the old table output from stdout must switch to `--human` or consume the JSON. No deprecation window — the agent surface is young (introduced in the 0.3.x line) and carried no stable-contract promise.
+- **`specwatch agent-report` now emits machine-readable AgentEvidence JSON on stdout by default** for `--consumer agent` sessions (schema `specwatch.agent_evidence.v1`). It previously printed human-readable tables to stdout. Use `--human` (or `--format human`, or `--pretty`) to restore the tables. The new `-o <file>` option writes the evidence JSON to a file; with `-o` and no `--human`, stdout also stays JSON. Any script that parsed the old table output from stdout must switch to `--human` or consume the JSON. No deprecation window — the agent surface is young (introduced in the 0.3.x line) and carried no stable-contract promise.
 
 ### Added
 
